@@ -186,16 +186,18 @@ export function validateQuirtContractSemantics(
   if (!("immutabilityRules" in bundle.receipt)) issues.push(issue("receipt", "Receipt contract must forbid secrets and false termination"));
 
   for (const phase of bundle.statusTaxonomy.phases) {
-    if (phase.phase.match(/^Q([3-9]|1\d|2[0-6])$/u) && phase.status !== "planned") {
-      issues.push(issue(`statusTaxonomy.phases.${phase.phase}`, "Future phases beyond Q2 must remain planned"));
+    if (phase.phase.match(/^Q([4-9]|1\d|2[0-6])$/u) && phase.status !== "planned") {
+      issues.push(issue(`statusTaxonomy.phases.${phase.phase}`, "Future phases beyond Q3 must remain planned"));
     }
   }
   const q0 = bundle.statusTaxonomy.phases.find((item) => item.phase === "Q0");
   const q1 = bundle.statusTaxonomy.phases.find((item) => item.phase === "Q1");
   const q2 = bundle.statusTaxonomy.phases.find((item) => item.phase === "Q2");
+  const q3 = bundle.statusTaxonomy.phases.find((item) => item.phase === "Q3");
   if (q0?.status !== "validated") issues.push(issue("statusTaxonomy.phases.Q0", "Q0 must be validated"));
   if (q1?.status !== "validated") issues.push(issue("statusTaxonomy.phases.Q1", "Q1 must be validated"));
   if (q2 !== undefined && q2.status === "planned") issues.push(issue("statusTaxonomy.phases.Q2", "Q2 must not remain planned after Q2 runtime implementation"));
+  if (q3 !== undefined && q3.status === "planned") issues.push(issue("statusTaxonomy.phases.Q3", "Q3 must not remain planned after Q3 execution kernel implementation"));
 
   for (const entry of bundle.conformance) {
     if (entry.area === "target_ed25519_signatures" && entry.implementationStatus === "validated") {
