@@ -1,8 +1,4 @@
-import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-require("node-pty");
+import { spawn } from "node-pty";
 
 const nonce = `quirt-pty-smoke-${Date.now()}`;
 const child = spawn("bash", ["-lc", `printf '%s\\n' '${nonce}'; exit 42`], {
