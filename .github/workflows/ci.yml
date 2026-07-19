@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install Ubuntu packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 tmux shellcheck systemd
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+
+      - name: Verify npm and TypeScript versions
+        run: |
+          npm install -g npm@11.16.0
+          npm --version
+          test "$(npm --version)" = "11.16.0"
+          npm install -g typescript@5.9.3
+          tsc --version
+          test "$(tsc --version)" = "Version 5.9.3"
+
+      - name: Run repository CI
+        run: npm run ci
+
+      - name: Upload CI evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .ci-receipts/**
+            release-output/**
+          retention-days: 14
+          if-no-files-found: warn
