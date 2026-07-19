@@ -111,9 +111,9 @@ if (!Array.isArray(corrections.summaryFieldsSupersededByRecordComputation) || !c
 
 const environment = records.find((record) => record.sourcePath === "src/quirt/environment.test.ts");
 if (environment === undefined || environment.sourceBlob !== EXPECTED.environmentBlob) fail("environment test authoritative anchor is incorrect");
-for (const [path, phrase] of [["src/server.ts", "public MCP"], ["ops/systemd/stealtheye-fix-operator.service", "operator service"]]) {
+for (const [path, expectedReason] of expectedExceptionEntries) {
   const record = records.find((item) => item.sourcePath === path);
-  if (record === undefined || record.included !== false || !String(record.reason).toLowerCase().includes(phrase.toLowerCase())) fail(`required boundary reclassification is missing for ${path}`);
+  if (record === undefined || record.included !== false || record.reason !== expectedReason) fail(`required boundary reclassification is missing for ${path}`);
 }
 
 const rejected = new Set(manifest.rejectedBlobList);
