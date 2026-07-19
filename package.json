@@ -1,0 +1,35 @@
+{
+  "name": "@stealtheye/quirt",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StealthEye Quirt standalone UID-0 root-control daemon",
+  "type": "module",
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
+  "scripts": {
+    "clean": "node -e \"const fs=require('node:fs'); for (const path of ['.test-dist','dist']) fs.rmSync(path,{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run clean && tsc -p tsconfig.test.json && node --test --test-concurrency=1 --experimental-test-coverage --test-coverage-lines=80 --test-coverage-functions=80 --test-coverage-branches=74 --test-coverage-exclude=.test-dist/canonical.js --test-coverage-exclude=.test-dist/quirt/*.test.js .test-dist/quirt/*.test.js",
+    "test:riding-guide": "node scripts/validate-riding-log.mjs",
+    "start:quirt": "node dist/quirt/supervisor-main.js",
+    "release:quirt": "bash scripts/build-quirt-release.sh",
+    "test:quirt-release": "npm run clean && tsc -p tsconfig.test.json && node --test --test-concurrency=1 .test-dist/quirt/release.test.js",
+    "test:quirt-reproducible": "bash scripts/test-quirt-release-reproducibility.sh",
+    "ci": "bash scripts/ci.sh"
+  },
+  "dependencies": {
+    "node-pty": "1.1.0",
+    "playwright-core": "1.61.1",
+    "tar": "7.5.19",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.4",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "node-gyp": "11.4.2",
+    "typescript": "5.9.3"
+  }
+}
