@@ -50,6 +50,21 @@ const markerName = existsSync(releaseRoot) ? readdirSync(releaseRoot).find((name
 const archivePath = archiveName === null ? null : join(releaseRoot, archiveName);
 const releaseArchiveSha256 = archivePath === null ? null : createHash("sha256").update(readFileSync(archivePath)).digest("hex");
 const releaseId = markerName === null ? null : readFileSync(join(releaseRoot, markerName), "utf8").trim();
+const contractBundlePath = "contracts/quirt-x-contracts-v1.json";
+const contractSchemaPath = "schemas/quirt-x-contracts-v1.schema.json";
+const contractBundleSha256 = existsSync(contractBundlePath) ? createHash("sha256").update(readFileSync(contractBundlePath)).digest("hex") : null;
+const contractSchemaSha256 = existsSync(contractSchemaPath) ? createHash("sha256").update(readFileSync(contractSchemaPath)).digest("hex") : null;
+let contractVersion = null;
+let operationDescriptorCount = null;
+let providerDescriptorCount = null;
+let capabilityDescriptorCount = null;
+if (existsSync(contractBundlePath)) {
+  const bundle = JSON.parse(readFileSync(contractBundlePath, "utf8"));
+  contractVersion = bundle.contractVersion ?? null;
+  operationDescriptorCount = Array.isArray(bundle.operations) ? bundle.operations.length : null;
+  providerDescriptorCount = Array.isArray(bundle.providers) ? bundle.providers.length : null;
+  capabilityDescriptorCount = Array.isArray(bundle.capabilities) ? bundle.capabilities.length : null;
+}
 writeFileSync(path, `${JSON.stringify({
   schemaVersion: "1.1.0",
   repository: "StealthEyeLLC/quirt-x",
@@ -68,6 +83,14 @@ writeFileSync(path, `${JSON.stringify({
   releaseId,
   releaseArchive: archiveName,
   releaseArchiveSha256,
+  contractVersion,
+  contractBundlePath,
+  contractBundleSha256,
+  contractSchemaPath,
+  contractSchemaSha256,
+  operationDescriptorCount,
+  providerDescriptorCount,
+  capabilityDescriptorCount,
   startTimestamp: start,
   finishTimestamp: finish,
   overallResult: result
@@ -96,6 +119,7 @@ gate "dependency-tree" npm ls --all >/dev/null
 gate "standalone-dependency-boundary" bash -c '! npm ls --omit=dev @modelcontextprotocol/sdk >/dev/null 2>&1'
 gate "production-audit" bash -c 'npm audit --omit=dev --audit-level=high'
 gate "typecheck" npm run check
+gate "contract-validation" npm run test:contracts
 gate "test-compile" bash -c 'npm run clean && npx tsc -p tsconfig.test.json'
 gate "unit-tests" npm test
 gate "production-build" npm run build

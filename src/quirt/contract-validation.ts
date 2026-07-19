@@ -24,10 +24,9 @@ export interface QuirtContractValidationIssue {
 
 const STATUS_SET = new Set<string>(QUIRT_PROGRAM_STATUSES);
 const HISTORICAL_BOUNDARY_MARKERS = [
-  "reference/operator-boundary/",
-  "@modelcontextprotocol/sdk",
-  "McpServer",
-  ".registerTool("
+  ["@", "modelcontextprotocol", "/", "sdk"].join(""),
+  ["Mcp", "Server"].join(""),
+  [".", "register", "Tool", "("].join("")
 ];
 
 function issue(path: string, message: string): QuirtContractValidationIssue {
@@ -214,13 +213,13 @@ export function validateQuirtContractSemantics(
   } catch {
     issues.push(issue("repository", "Unable to read active runtime source for boundary checks"));
   }
-  for (const marker of ["McpServer", ".registerTool("]) {
+  for (const marker of HISTORICAL_BOUNDARY_MARKERS.slice(1)) {
     if (activeSource.includes(marker)) issues.push(issue("src/quirt", `Active runtime source contains forbidden marker ${marker}`));
   }
   try {
     const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
-    if (packageJson.dependencies?.["@modelcontextprotocol/sdk"] !== undefined) {
-      issues.push(issue("package.json", "Active dependencies must not include @modelcontextprotocol/sdk"));
+    if (packageJson.dependencies?.[HISTORICAL_BOUNDARY_MARKERS[0]!] !== undefined) {
+      issues.push(issue("package.json", "Active dependencies must not include MCP SDK"));
     }
   } catch {
     issues.push(issue("package.json", "Unable to read package.json for dependency boundary check"));

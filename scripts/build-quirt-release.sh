@@ -111,7 +111,7 @@ while IFS= read -r file; do
   target="$release/${file}"
   mkdir -p -- "$(dirname "$target")"
   cp -- "$file" "$target"
-done < <(find dist/quirt -type f -name '*.js' -printf '%p\n' | sort)
+done < <(find dist/quirt -type f -name '*.js' ! -name 'contract-*.js' ! -name 'release-admin.js' -printf '%p\n' | sort)
 cp -- dist/canonical.js "$release/dist/"
 [[ -f "$release/dist/quirt/supervisor-main.js" ]] || { printf '%s\n' 'compiled Quirt supervisor entrypoint is missing' >&2; exit 1; }
 [[ ! -e "$release/dist/principal-grant.js" ]] || { printf '%s\n' 'operator grant code entered the standalone release' >&2; exit 1; }
@@ -120,6 +120,11 @@ if grep -RIl -- '@modelcontextprotocol\|McpServer\|registerTool' "$release/dist"
   exit 1
 fi
 cp -- provenance/extraction-manifest.json "$release/evidence/extraction-manifest.json"
+mkdir -p -- "$release/contracts" "$release/schemas" "$release/docs"
+cp -- contracts/quirt-x-contracts-v1.json "$release/contracts/"
+cp -- schemas/quirt-x-contracts-v1.schema.json "$release/schemas/"
+cp -- docs/QUIRT_X_ARCHITECTURE.md docs/QUIRT_X_PROTOCOL_SPEC.md docs/QUIRT_X_CONTRACTS.md "$release/docs/"
+cp -- NOTICE.md THIRD_PARTY.md "$release/"
 
 npm sbom --omit=dev --omit=optional --package-lock-only --sbom-format cyclonedx \
   --prefix "$release" | node scripts/normalize-quirt-sbom.mjs "$commit" "$tree" "$epoch" \
