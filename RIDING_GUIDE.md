@@ -290,3 +290,28 @@ No update may be claimed until it exists in repository source or durable Quirt s
 - **Verification:** exact-head `npm run ci` passed with 30 gates; unit tests 207 total / 194 passed / 0 failed / 13 skipped; release tests 25 passed; coverage 91.22% lines / 74.77% branches / 86.74% functions; release archive SHA-256 `c303a04c1f6d628b9988a8f942aee53d2daa65f664255ca66c0c0bbc511f9eeb`
 - **Supersedes:** none
 - **Notes:** Q0 baseline on `main` starts at merge commit `c10be8b7504a68fd48422bfd1b4d5b2d3c3cc39b` tree `a7359e1b850dc6d3809572e2d8f69fe9487b30e5`. No deployment occurred. No production mutation occurred. No GitHub Actions were added.
+
+## Entry RG-0011 — Q3 full-power execution kernel
+
+- **Timestamp:** 2026-07-19T13:55:33Z
+- **Horsey revision:** not changed in this checkpoint
+- **Operator base revision:** not applicable; canonical repository is `StealthEyeLLC/quirt-x`
+- **Quirt revision:** `5913f7b19398fb31978fa167831685b6d7c3c726`
+- **Quirt tree:** `72c1e62e90cca36aa4b51d83108cbf6e1e92b326`
+- **User wording:** `You are Cursor Agent taking complete ownership of StealthEye Quirt-X Checkpoint Q3 for Jamie Currier / StealthEye LLC.`
+- **Intended action:** implement the Q3 full-power execution kernel with process identity, receipts, environment policy, termination semantics, and state schema migration without deployment or Q4 work
+- **Tool operation:** source Q3 execution-kernel checkpoint on exact Q2 `main` baseline `83f8d85e45d4a7af2316e635210d14f02aaed4a0`
+- **Exact terminal input or command:** `npm ci`; `npm run export:contracts`; `npm run check`; `npm run test:contracts`; `npm test`; `npm run build`; `npm run test:riding-guide`; `npm run test:quirt-release`; `npm run test:quirt-reproducible`; `npm audit --omit=dev --audit-level=high`; `git diff --check`; `npm run ci`
+- **Result:** `WORKS`
+- **ChatGPT invoked the tool:** yes
+- **Horsey received the request:** no
+- **Quirt received the request:** no; no production Quirt endpoint was contacted
+- **Linux executed it:** yes; source validation only
+- **Exit status:** 0 for final `npm run ci` on head `5913f7b19398fb31978fa167831685b6d7c3c726`
+- **Working wording:** direct Q3 full-power execution-kernel instruction for the standalone repository
+- **Denied or blocked wording:** none observed in source scope
+- **Observed limitation:** Q3 is source complete only. Thirteen host-dependent integration tests skipped for absent executables or explicit live fixtures. No production deployment, socket activation, or Q4 durable reconciliation occurred.
+- **Output or recording reference:** branch `build/quirt-x-q3-full-power-execution-kernel` head `5913f7b19398fb31978fa167831685b6d7c3c726` tree `72c1e62e90cca36aa4b51d83108cbf6e1e92b326`; baseline `83f8d85e45d4a7af2316e635210d14f02aaed4a0` tree `072ea5cd38bcc23e2ec667b1d4b89176d41b24eb`; catalog 148 operations / 26 capabilities; unit tests 233 total / 220 passed / 0 failed / 13 skipped; release tests 25 passed; coverage 90.97% lines / 74.02% branches / 86.74% functions; contract bundle `eaced0beefa7cb4cf46903e97f23d8f2ee02552d6861f91f9bc2e3504b611dd0`; schema `afcfd9eda7acce84d5ce9bb22d7208dcb2004807c7095edea417543aa6abe9e9`; release archive `2c9abff1860aacf38138b9080a95da8c3768300545786d957a221eaa94070f4b`; CI receipt `.ci-receipts/ci-5913f7b19398fb31978fa167831685b6d7c3c726.json` digest `8158ff4dc0dcb7a4fe75d180e31b1c01c66c3c79eb3ebe6eb95edfe8e7ddca71`
+- **Verification:** exact-head `npm run ci` passed on Node v24.18.0 / npm 11.16.0 / TypeScript 5.9.3; state schema migrated 19→20; focused Q3 tests in `job-manager-q3.test.ts` and `execution-kernel-q3.test.ts`; standalone topology correction applied; GitHub Actions evidence pending remote readback on push
+- **Supersedes:** none
+- **Notes:** Quirt remains standalone with Horsey optional. Socket path `/run/horsey/quirt.sock` unchanged. No MCP, OAuth, or public listener added. Q4 not started. PR remains open and unmerged for verification.
