@@ -234,7 +234,7 @@ describe("Quirt resource accounting review regressions", () => {
     await accumulator.start();
     await accumulator.sampleOnce();
     await accumulator.sampleOnce();
-    accumulator.stop();
+    await accumulator.stopAndFinalizeSample();
     const evidence = accumulator.finalize(Date.now() - 500, Date.now());
     assert.equal(evidence.maximumRssBytes.availability, "sampled");
     if (evidence.maximumRssBytes.availability === "sampled") assert.equal(evidence.maximumRssBytes.value, 2048 * 1024);
@@ -262,7 +262,7 @@ describe("Quirt resource accounting review regressions", () => {
     await accumulator.start();
     await accumulator.sampleOnce();
     await accumulator.sampleOnce();
-    accumulator.stop();
+    await accumulator.stopAndFinalizeSample();
     assert.equal(maxActive, 1);
     assert.equal(DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS, 200);
     const sample = await readResourceSample(42, probe);
@@ -277,7 +277,7 @@ describe("Quirt resource accounting review regressions", () => {
     };
     const accumulator = new ResourceAccumulator(42, probe, 10);
     await accumulator.sampleOnce();
-    accumulator.stop();
+    await accumulator.stopAndFinalizeSample();
     const evidence = accumulator.finalize(0, 100);
     assert.equal(evidence.userCpuTicks.availability, "unavailable");
     assert.equal(evidence.maximumRssBytes.availability, "unavailable");

@@ -425,7 +425,7 @@ export class QuirtJobManager {
   shutdown(): void {
     for (const [jobId, handle] of this.#handles) {
       if (handle.timeout !== null) clearTimeout(handle.timeout);
-      handle.resourceAccumulator?.stop();
+      void handle.resourceAccumulator?.stopAndFinalizeSample().catch(() => {});
       const record = this.state.getJob(jobId);
       if (!TERMINAL_STATUSES.has(record.status)) {
         this.state.updateJob(jobId, { status: record.processId !== null ? "unknown" : "lost" });
@@ -545,7 +545,7 @@ export class QuirtJobManager {
         this.#emitState(job, "running");
       }
     } catch (cause) {
-      handle.resourceAccumulator?.stop();
+      void handle.resourceAccumulator?.stopAndFinalizeSample().catch(() => {});
       this.state.updateJob(job.jobId, { status: "spawn_failed", finished: true });
       throw cause instanceof QuirtError ? cause : new QuirtError("internal_error", "Quirt execution identity capture failed");
     }
@@ -600,7 +600,7 @@ export class QuirtJobManager {
         this.#emitState(job, "running");
       }
     } catch (cause) {
-      handle.resourceAccumulator?.stop();
+      void handle.resourceAccumulator?.stopAndFinalizeSample().catch(() => {});
       this.state.updateJob(job.jobId, { status: "spawn_failed", finished: true });
       throw cause instanceof QuirtError ? cause : new QuirtError("internal_error", "Quirt execution identity capture failed");
     }
@@ -678,8 +678,7 @@ export class QuirtJobManager {
   async #finish(jobId: string, handle: JobHandle, exitCode: number | null, signal: string | null, status: QuirtJobRecord["status"], form: QuirtLaunchForm): Promise<void> {
     const tracked = this.#handles.get(jobId) ?? handle;
     if (handle.timeout !== null) clearTimeout(handle.timeout);
-    handle.resourceAccumulator?.stop();
-    await handle.resourceAccumulator?.sampleOnce();
+    await handle.resourceAccumulator?.stopAndFinalizeSample();
     const before = this.state.getJob(jobId);
     if (TERMINAL_STATUSES.has(before.status) && before.receiptId !== null) {
       tracked.resolve(before);

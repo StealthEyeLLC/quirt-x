@@ -110,8 +110,9 @@ export async function readResourceSample(pid: number, probe: ResourceProbe): Pro
 
 export class ResourceAccumulator {
   #timer: NodeJS.Timeout | null = null;
-  #sampling = false;
-  #stopped = false;
+  #samplingPromise: Promise<void> | null = null;
+  #acceptingSamples = true;
+  #finalized = false;
   #userCpuTicks: number | null = null;
   #systemCpuTicks: number | null = null;
   #maximumRssBytes: number | null = null;
@@ -132,45 +133,30 @@ export class ResourceAccumulator {
   ) {}
 
   async start(): Promise<void> {
-    if (this.#stopped) return;
-    void this.#sampleOnce();
-    if (this.#stopped) return;
-    this.#timer = setInterval(() => { void this.#sampleOnce(); }, this.intervalMs);
+    if (this.#finalized) return;
+    void this.#requestLiveSample();
+    if (this.#finalized || !this.#acceptingSamples) return;
+    this.#timer = setInterval(() => { void this.#requestLiveSample(); }, this.intervalMs);
     this.#timer.unref();
   }
 
   stop(): void {
-    this.#stopped = true;
-    if (this.#timer !== null) {
-      clearInterval(this.#timer);
-      this.#timer = null;
-    }
+    this.#acceptingSamples = false;
+    this.#clearTimer();
   }
 
   async sampleOnce(): Promise<void> {
-    await this.#sampleOnce();
+    await this.#requestLiveSample();
   }
 
-  async #sampleOnce(): Promise<void> {
-    if (this.#stopped || this.#sampling) return;
-    this.#sampling = true;
-    try {
-      const sample = await readResourceSample(this.pid, this.probe);
-      const anyField = Object.values(sample).some(value => value !== null);
-      if (!anyField) return;
-      this.#hadSuccessfulSample = true;
-      this.#lastCapturedAt = this.capturedAt();
-      this.#userCpuTicks = mergeLatest(this.#userCpuTicks, sample.userCpuTicks, "latest");
-      this.#systemCpuTicks = mergeLatest(this.#systemCpuTicks, sample.systemCpuTicks, "latest");
-      this.#maximumRssBytes = mergeLatest(this.#maximumRssBytes, sample.maximumRssBytes, "max");
-      this.#virtualMemoryBytes = mergeLatest(this.#virtualMemoryBytes, sample.virtualMemoryBytes, "max");
-      this.#readBytes = mergeLatest(this.#readBytes, sample.readBytes, "latest");
-      this.#writeBytes = mergeLatest(this.#writeBytes, sample.writeBytes, "latest");
-      this.#voluntaryContextSwitches = mergeLatest(this.#voluntaryContextSwitches, sample.voluntaryContextSwitches, "latest");
-      this.#involuntaryContextSwitches = mergeLatest(this.#involuntaryContextSwitches, sample.involuntaryContextSwitches, "latest");
-      this.#threadCount = mergeLatest(this.#threadCount, sample.threadCount, "max");
-    } catch { /* sampling failures must not fail execution */ }
-    finally { this.#sampling = false; }
+  async stopAndFinalizeSample(): Promise<void> {
+    if (this.#finalized) return;
+    this.#acceptingSamples = false;
+    this.#clearTimer();
+    await this.#awaitActiveSample();
+    if (!this.#finalized) await this.#startSample("final");
+    this.#finalized = true;
+    this.#samplingPromise = null;
   }
 
   finalize(startedAtMs: number, finishedAtMs: number): QuirtResourceEvidence {
@@ -192,6 +178,63 @@ export class ResourceAccumulator {
       capturedAt: this.#lastCapturedAt ?? this.capturedAt()
     });
   }
+
+  #clearTimer(): void {
+    if (this.#timer !== null) {
+      clearInterval(this.#timer);
+      this.#timer = null;
+    }
+  }
+
+  async #awaitActiveSample(): Promise<void> {
+    if (this.#samplingPromise === null) return;
+    await this.#samplingPromise.catch(() => { /* sampling failures must not fail execution */ });
+  }
+
+  async #requestLiveSample(): Promise<void> {
+    if (this.#finalized || !this.#acceptingSamples) return;
+    if (this.#samplingPromise !== null) {
+      await this.#samplingPromise.catch(() => { /* sampling failures must not fail execution */ });
+      return;
+    }
+    await this.#startSample("live");
+  }
+
+  async #startSample(phase: "live" | "final"): Promise<void> {
+    if (phase === "live" && (this.#finalized || !this.#acceptingSamples)) return;
+    if (phase === "final" && this.#finalized) return;
+    if (this.#samplingPromise !== null) {
+      await this.#samplingPromise.catch(() => { /* sampling failures must not fail execution */ });
+      if (phase === "live" || this.#finalized) return;
+    }
+    const promise = this.#performSample();
+    this.#samplingPromise = promise;
+    try {
+      await promise;
+    } finally {
+      if (this.#samplingPromise === promise) this.#samplingPromise = null;
+    }
+  }
+
+  async #performSample(): Promise<void> {
+    try {
+      const sample = await readResourceSample(this.pid, this.probe);
+      if (this.#finalized) return;
+      const anyField = Object.values(sample).some(value => value !== null);
+      if (!anyField) return;
+      this.#hadSuccessfulSample = true;
+      this.#lastCapturedAt = this.capturedAt();
+      this.#userCpuTicks = mergeLatest(this.#userCpuTicks, sample.userCpuTicks, "latest");
+      this.#systemCpuTicks = mergeLatest(this.#systemCpuTicks, sample.systemCpuTicks, "latest");
+      this.#maximumRssBytes = mergeLatest(this.#maximumRssBytes, sample.maximumRssBytes, "max");
+      this.#virtualMemoryBytes = mergeLatest(this.#virtualMemoryBytes, sample.virtualMemoryBytes, "max");
+      this.#readBytes = mergeLatest(this.#readBytes, sample.readBytes, "latest");
+      this.#writeBytes = mergeLatest(this.#writeBytes, sample.writeBytes, "latest");
+      this.#voluntaryContextSwitches = mergeLatest(this.#voluntaryContextSwitches, sample.voluntaryContextSwitches, "latest");
+      this.#involuntaryContextSwitches = mergeLatest(this.#involuntaryContextSwitches, sample.involuntaryContextSwitches, "latest");
+      this.#threadCount = mergeLatest(this.#threadCount, sample.threadCount, "max");
+    } catch { /* sampling failures must not fail execution */ }
+  }
 }
 
 export async function sampleResourceEvidence(
@@ -202,7 +245,7 @@ export async function sampleResourceEvidence(
   capturedAt: () => string = () => new Date().toISOString()
 ): Promise<QuirtResourceEvidence> {
   const accumulator = new ResourceAccumulator(pid, probe, DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS, capturedAt);
-  await accumulator.sampleOnce();
-  accumulator.stop();
+  await accumulator.start();
+  await accumulator.stopAndFinalizeSample();
   return accumulator.finalize(startedAtMs, finishedAtMs);
 }
