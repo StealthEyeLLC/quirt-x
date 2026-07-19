@@ -81,7 +81,7 @@ export class QuirtFramedChannel {
       for (const frame of this.#decoder.push(chunk)) this.#events.emit("frame", frame);
     } catch (cause) {
       if (this.#events.listenerCount("decodeError") > 0) this.#events.emit("decodeError", cause);
-      else this.close(cause);
+      this.close(cause);
     }
   }
 
