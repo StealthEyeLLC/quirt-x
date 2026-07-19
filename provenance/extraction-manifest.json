@@ -16,7 +16,7 @@
   "excludedCount": 101,
   "totalRecordCount": 188,
   "exactCopyCount": 84,
-  "transformedCount": 3,
+  "transformedCount": 4,
   "destinationFileCount": 87,
   "rejectedBlobList": [
     "313e7b2ee0198758819ce85dd94524fab0827fc7",
@@ -2762,10 +2762,10 @@
       "included": true,
       "reason": "authoritative standalone inventory path",
       "destinationPath": "src/quirt/pty.test.ts",
-      "copyOrTransformation": "exact-copy",
-      "transformationDescription": null,
+      "copyOrTransformation": "transformed",
+      "transformationDescription": "increase forced-close waitFor timeout for CI host load",
       "destinationBlob": "afceff5931c64aae79660998ab1be2b855dc2bbb",
-      "verificationStatus": "verified-included"
+      "verificationStatus": "verified-transformed"
     },
     {
       "sourceRepository": "StealthEyeLLC/stealtheye-fix-operator",
