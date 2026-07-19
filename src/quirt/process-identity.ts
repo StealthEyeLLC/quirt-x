@@ -223,5 +223,10 @@ export async function captureNamespaceIdentities(pid: number, reader: ProcReader
 }
 
 export function isProcessAlive(pid: number, killProbe: (pid: number, signal: 0) => void = (value, signal) => process.kill(value, signal)): boolean {
-  try { killProbe(pid, 0); return true; } catch { return false; }
+  try {
+    killProbe(pid, 0);
+    return true;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
 }
