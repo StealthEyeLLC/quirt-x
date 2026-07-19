@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "manifestBlob": "5588eae106120d0a8e5846aba46868f88a21ad8c",
+  "extractionSnapshotCommit": "9008f6dd494cd848851234d1f4215cefb42549c0",
+  "extractionSnapshotTree": "82dca3c7d6aeef358a85e299e37b0234a882c518",
+  "summaryFieldsSupersededByRecordComputation": [
+    "exactCopyCount",
+    "transformedCount"
+  ],
+  "snapshotFieldsNotCurrentHeadIdentity": [
+    "finalDestinationCommit",
+    "finalDestinationTree",
+    "remoteReadbackStatus"
+  ],
+  "reason": "The extraction manifest is an immutable snapshot of the last content-bearing extraction commit. Exact-copy and transformation totals are recomputed from all records, and current audit corrections are authenticated by Git history plus exact-head CI rather than by self-referential manifest fields."
+}

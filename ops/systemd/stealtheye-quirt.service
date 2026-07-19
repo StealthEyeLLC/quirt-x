@@ -1,6 +1,6 @@
 [Unit]
 Description=StealthEye Quirt unrestricted UID-0 terminal supervisor
-Documentation=https://github.com/StealthEyeLLC/stealtheye-fix-operator
+Documentation=https://github.com/StealthEyeLLC/quirt-x
 Requires=stealtheye-quirt.socket
 After=local-fs.target stealtheye-quirt.socket
 ConditionFileNotEmpty=/etc/stealtheye-quirt/quirt.env
