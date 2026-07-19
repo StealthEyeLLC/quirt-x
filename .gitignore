@@ -9,4 +9,4 @@ coverage/
 *.log
 .ci-receipts/
 release-output/
-quirt-x-build/quirt-x-build/
+quirt-x-build/
