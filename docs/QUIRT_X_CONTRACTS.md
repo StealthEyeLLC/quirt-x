@@ -40,7 +40,7 @@ Q1 freezes the permanent contracts that Q2–Q26 must implement against:
 
 ## Operation contract
 
-Every catalog operation resolves to exactly one versioned descriptor with provider mapping, capability mapping, execution class, receipt requirements, and deprecation state. Current catalog size: 146 operations.
+Every catalog operation resolves to exactly one versioned descriptor with provider mapping, capability mapping, execution class, receipt requirements, and deprecation state. Current catalog size: 148 operations (Q3 adds `quirt.receipt.get` and `quirt.receipt.list` for immutable execution receipts).
 
 ## Provider contract
 

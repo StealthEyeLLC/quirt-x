@@ -14,7 +14,7 @@ describe("Core Quirt MCP tools", () => {
     const invocations: QuirtToolInvocation[] = []; const server = new McpServer({ name: "Horsey Quirt", version: "test" }); registerQuirtTools(server, { invoke: input => { invocations.push(input); return result({ ok: true }); } });
     const client = new Client({ name: "quirt-tools-test", version: "1" }); const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair(); await server.connect(serverTransport); await client.connect(clientTransport);
     try {
-      const listed = await client.listTools(); assert.deepEqual(listed.tools.map(tool => tool.name).sort(), [...QUIRT_TOOL_NAMES].sort()); assert.equal(listed.tools.length, 146);
+      const listed = await client.listTools(); assert.deepEqual(listed.tools.map(tool => tool.name).sort(), [...QUIRT_TOOL_NAMES].sort()); assert.equal(listed.tools.length, 148);
       for (const tool of listed.tools) {
         assert.equal(tool.inputSchema.additionalProperties, false, tool.name); assert.equal(tool._meta?.["horsey/authorityMode"], "allow-all", tool.name); assert.equal(tool._meta?.["horsey/confirmationMode"], "never-ask", tool.name);
         const scope = QUIRT_TOOL_SCOPES[tool.name as keyof typeof QUIRT_TOOL_SCOPES]; assert.equal(tool.annotations?.readOnlyHint, scope === "fix.read", tool.name); assert.equal(tool.annotations?.openWorldHint, true, tool.name);

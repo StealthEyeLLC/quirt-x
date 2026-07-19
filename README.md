@@ -1,6 +1,8 @@
 # Quirt-X
 
-StealthEye Quirt-X is the standalone UID-0 root-control daemon for Horsey. It exposes a private Unix socket at `/run/horsey/quirt.sock` and serves signed, replay-resistant operations for unrestricted owner authority after exact authentication of `stealtheye-owner`.
+StealthEye Quirt-X is the standalone UID-0 root-control daemon. It exposes a private Unix socket at `/run/horsey/quirt.sock` and serves signed, replay-resistant operations for unrestricted owner authority after exact authentication of `stealtheye-owner`.
+
+Quirt installs, starts, executes, recovers, updates, rolls back, and enters rescue mode without Horsey. Horsey remains an optional controller, not a runtime dependency.
 
 This repository is the canonical standalone program repository `StealthEyeLLC/quirt-x`. Historical extraction provenance remains in `provenance/extraction-manifest.json`.
 
@@ -11,7 +13,8 @@ This repository is the canonical standalone program repository `StealthEyeLLC/qu
 | Q0 | `validated` — standalone source-complete release foundation merged to `main` |
 | Q1 | `validated` — canonical standalone contracts frozen on `build/quirt-x-q1-canonical-contracts` |
 | Q2 | `source complete` — Ed25519 runtime, key rotation, replay/reconnect hardening, compression negotiation, public Actions CI |
-| Q3–Q26 | `planned` |
+| Q3 | `source complete` — full-power execution kernel with process identity, receipts, environment policy, and termination semantics |
+| Q4–Q26 | `planned` |
 
 Q1 is a source-and-contract checkpoint. It freezes contracts and validation; it does not deploy Quirt or implement Q2 runtime cryptography.
 

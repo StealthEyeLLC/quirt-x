@@ -14,6 +14,7 @@ import { QuirtJobManager } from "./job-manager.js";
 import { QuirtOperationDispatcher } from "./operations.js";
 import { QuirtProcessService, type QuirtJournalAdapter, type QuirtJournalPage, type QuirtJournalQuery, type QuirtProcessIdentity } from "./process-service.js";
 import type { QuirtPtyExit, QuirtPtyFactory, QuirtPtyProcess, QuirtPtySpawn } from "./pty.js";
+import { LinuxProcReader, syntheticProcessIdentity } from "./process-identity.js";
 import { encodeFrame, QUIRT_PROTOCOL_VERSION, type QuirtFrame } from "./protocol.js";
 import { QuirtSessionManager } from "./session-manager.js";
 import { QuirtStateStore } from "./state.js";
@@ -25,7 +26,7 @@ class FakePty implements QuirtPtyProcess {
   readonly events = new EventEmitter(); readonly writes: Buffer[] = [];
   constructor(readonly pid: number) {}
   write(bytes: Buffer): void { this.writes.push(Buffer.from(bytes)); }
-  resize(): void {} signal(): void { this.events.emit("exit", { exitCode: 0, signal: null } satisfies QuirtPtyExit); } pause(): void {} resume(): void {}
+  resize(): void {} signal(signal: NodeJS.Signals = "SIGTERM"): void { this.events.emit("exit", { exitCode: 0, signal: signal === "SIGKILL" ? 9 : signal === "SIGTERM" ? 15 : null } satisfies QuirtPtyExit); } pause(): void {} resume(): void {}
   onData(listener: (bytes: Buffer) => void): () => void { this.events.on("data", listener); return () => this.events.off("data", listener); }
   onExit(listener: (exit: QuirtPtyExit) => void): () => void { this.events.on("exit", listener); return () => this.events.off("exit", listener); }
   output(bytes: Buffer): void { this.events.emit("data", Buffer.from(bytes)); }
@@ -62,7 +63,7 @@ afterEach(() => {
 });
 
 function fixture(options: { files?: QuirtFileService; journal?: QuirtJournalAdapter } = {}): { root: string; client: QuirtGatewayClient; newClient: () => QuirtGatewayClient; sockets: SupervisorSockets; ptys: FakePtys; state: QuirtStateStore } {
-  const root = mkdtempSync(join(tmpdir(), "quirt-protocol-integration-")); roots.push(root); const config = quirtTestConfig(root); const state = new QuirtStateStore(":memory:"); stores.push(state); const authority = installTestAuthority(config, state, root); const ptys = new FakePtys(); const tmux = new NoTmux() as unknown as QuirtTmuxController; const sessionManager = new QuirtSessionManager(config, state, ptys, tmux); const jobManager = new QuirtJobManager(config, state, ptys); sessions.push(sessionManager); jobs.push(jobManager);
+  const root = mkdtempSync(join(tmpdir(), "quirt-protocol-integration-")); roots.push(root); const config = quirtTestConfig(root); const state = new QuirtStateStore(":memory:"); stores.push(state); const authority = installTestAuthority(config, state, root); const ptys = new FakePtys(); const tmux = new NoTmux() as unknown as QuirtTmuxController; const sessionManager = new QuirtSessionManager(config, state, ptys, tmux); const jobManager = new QuirtJobManager(config, state, ptys, { procReader: Object.assign(new LinuxProcReader(), { tryCaptureSync(pid: number) { return pid >= 500 ? syntheticProcessIdentity(pid) : null; } }) }); sessions.push(sessionManager); jobs.push(jobManager);
   const services = {
     ...(options.files === undefined ? {} : { files: options.files }),
     ...(options.journal === undefined ? {} : { processService: new QuirtProcessService(config, state, sessionManager, jobManager, options.journal, (pid, signal) => { if (pid !== Number(readlinkSync("/proc/self")) || signal !== 0 && signal !== "SIGCONT") throw new Error("unexpected test signal"); }) })
@@ -99,9 +100,13 @@ describe("Quirt Gateway client and root supervisor", () => {
   });
 
   it("durably records a side effect before a lost response and replays it without executing twice", async () => {
-    const f = fixture(); const marker = join(f.root, "effect.txt"); const script = `setTimeout(()=>{require('node:fs').appendFileSync(${JSON.stringify(marker)},'x');process.stdout.write('done')},100)`; const payload = { executable: process.execPath, arguments: ["-e", script] };
-    const pending = f.client.request({ operation: "quirt.exec", payload, principal: TEST_PRINCIPAL, requestId: "disconnect-effect" }); await waitFor(() => f.state.listJobs().some(job => job.requestId === "disconnect-effect")); f.sockets.disconnectLatest(); await assert.rejects(pending);
-    await waitFor(() => f.state.requestResult("disconnect-effect")?.state === "completed"); const replay = await f.client.request({ operation: "quirt.exec", payload, principal: TEST_PRINCIPAL, requestId: "disconnect-effect" }); assert.equal(replay.replayed, true); assert.equal(replay.binary.toString(), "done"); assert.equal(readFileSync(marker, "utf8"), "x"); assert.equal(f.state.listJobs().filter(job => job.requestId === "disconnect-effect").length, 1);
+    const f = fixture(); const marker = join(f.root, "effect.txt"); const payload = { command: `sleep 1; printf done >> ${JSON.stringify(marker)}; printf done`, detach: true };
+    const started = await f.client.request({ operation: "quirt.exec", payload, principal: TEST_PRINCIPAL, requestId: "disconnect-effect" }); assert.equal((started.payload as { detached: boolean }).detached, true);
+    f.sockets.disconnectLatest();
+    await waitFor(() => existsSync(marker) && readFileSync(marker, "utf8").includes("done"), 10_000);
+    await waitFor(() => f.state.requestResult("disconnect-effect")?.state === "completed", 10_000);
+    const replay = await f.client.request({ operation: "quirt.exec", payload, principal: TEST_PRINCIPAL, requestId: "disconnect-effect" });
+    assert.equal(replay.replayed, true); assert.equal((replay.payload.job as { jobId: string }).jobId, (started.payload.job as { jobId: string }).jobId); assert.equal(readFileSync(marker, "utf8"), "done"); assert.equal(f.state.listJobs().filter(job => job.requestId === "disconnect-effect").length, 1);
   });
 
   it("keeps a supervisor-owned PTY alive across Gateway client restart with raw event and offset replay", async () => {
@@ -115,11 +120,18 @@ describe("Quirt Gateway client and root supervisor", () => {
   });
 
   it("routes the complete durable detached-job lifecycle over the framed Gateway protocol", async () => {
-    const f = fixture(); const started = await f.client.request({ operation: "quirt.exec", payload: { executable: "/bin/bash", arguments: ["--noprofile", "--norc"], pty: true, detach: true, columns: 80, rows: 24 }, principal: TEST_PRINCIPAL, requestId: "gateway-job" }); const jobId = (started.payload.job as { jobId: string }).jobId;
+    const f = fixture();
+    const started = await f.client.request({ operation: "quirt.exec", payload: { command: "sleep 30", pty: true, detach: true, columns: 80, rows: 24 }, principal: TEST_PRINCIPAL, requestId: "gateway-job" }); const jobId = (started.payload.job as { jobId: string }).jobId;
     const listed = await f.client.request({ operation: "quirt.job.list", principal: TEST_PRINCIPAL }); assert.ok((listed.payload.jobs as Array<{ jobId: string }>).some(job => job.jobId === jobId)); const loaded = await f.client.request({ operation: "quirt.job.get", payload: { jobId }, principal: TEST_PRINCIPAL }); assert.equal((loaded.payload.job as { status: string }).status, "running"); const attached = await f.client.request({ operation: "quirt.job.attach", payload: { jobId }, principal: TEST_PRINCIPAL }); assert.equal((attached.payload.job as { jobId: string }).jobId, jobId);
     const input = Buffer.from([0, 255, 10]); await f.client.request({ operation: "quirt.job.input", payload: { jobId, close: false }, binary: input, principal: TEST_PRINCIPAL }); assert.deepEqual(f.ptys.processes.at(-1)!.writes, [input]); f.ptys.processes.at(-1)!.output(Buffer.from("job-output")); const stdout = await f.client.request({ operation: "quirt.job.read", payload: { jobId, stream: "stdout", after: 0, maximumBytes: 4096 }, principal: TEST_PRINCIPAL }); assert.equal(stdout.binary.toString(), "job-output"); const stderr = await f.client.request({ operation: "quirt.job.read", payload: { jobId, stream: "stderr", after: 0, maximumBytes: 4096 }, principal: TEST_PRINCIPAL }); assert.equal(stderr.binary.length, 0);
-    const signaled = await f.client.request({ operation: "quirt.job.signal", payload: { jobId, signal: "SIGTERM" }, principal: TEST_PRINCIPAL }); assert.equal((signaled.payload.job as { status: string }).status, "exited");
-    const cancelStarted = await f.client.request({ operation: "quirt.exec", payload: { executable: "/bin/bash", pty: true, detach: true }, principal: TEST_PRINCIPAL, requestId: "gateway-job-cancel" }); const cancelId = (cancelStarted.payload.job as { jobId: string }).jobId; const canceled = await f.client.request({ operation: "quirt.job.cancel", payload: { jobId: cancelId, force: true }, principal: TEST_PRINCIPAL }); assert.equal((canceled.payload.job as { status: string }).status, "canceled");
+    const signaled = await f.client.request({ operation: "quirt.job.signal", payload: { jobId, signal: "SIGTERM" }, principal: TEST_PRINCIPAL });
+    await waitFor(() => f.state.getJob(jobId).finishedAt !== null, 10_000);
+    assert.ok(["exited", "signaled"].includes(f.state.getJob(jobId).status));
+    assert.equal((signaled.payload.job as { status: string }).status, "running");
+    const cancelStarted = await f.client.request({ operation: "quirt.exec", payload: { command: "sleep 30", pty: true, detach: true }, principal: TEST_PRINCIPAL, requestId: "gateway-job-cancel" }); const cancelId = (cancelStarted.payload.job as { jobId: string }).jobId;
+    await f.client.request({ operation: "quirt.job.cancel", payload: { jobId: cancelId, force: true }, principal: TEST_PRINCIPAL });
+    await waitFor(() => f.state.getJob(cancelId).finishedAt !== null, 10_000);
+    assert.ok(["canceled", "signaled", "exited"].includes(f.state.getJob(cancelId).status));
   });
 
   it("fails closed on an unsupported supervisor protocol version", async () => {

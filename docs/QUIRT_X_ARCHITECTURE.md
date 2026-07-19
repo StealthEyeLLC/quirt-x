@@ -7,21 +7,21 @@
 
 ## Purpose
 
-Quirt-X is the standalone UID-0 privileged local-machine authority for StealthEye Horsey. It executes signed requests from the thin unprivileged Horsey gateway over a private Unix socket. Quirt is not a public control plane, OAuth server, MCP server, objective scheduler, or rootless execution kernel.
+Quirt-X is the standalone UID-0 privileged local-machine authority. It executes signed requests from authorized clients over a private Unix socket. Horsey is an optional controller, not a runtime dependency. Quirt is not a public control plane, OAuth server, MCP server, objective scheduler, or rootless execution kernel.
 
 ## Topology
 
 ```text
-Jamie
-  ↓
-ChatGPT / Horsey
-  ↓
-Thin unprivileged OAuth and MCP gateway
-  ↓
-Signed private Quirt protocol
-  ↓
+Authorized Quirt client
+  ├── standalone CLI/admin client
+  ├── future thin ChatGPT Quirt plugin
+  ├── optional Horsey controller
+  └── other explicitly authorized clients
+        ↓
+Signed private QES-2 protocol
+        ↓
 /run/horsey/quirt.sock
-  ↓
+        ↓
 Standalone UID-0 Quirt-X daemon
 ```
 

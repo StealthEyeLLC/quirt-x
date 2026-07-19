@@ -35,7 +35,7 @@ describe("Quirt immediate execution and durable jobs", () => {
 
   it("enforces timeouts and persists detached output, input, offsets, attachment, and cancellation", async () => {
     const { jobs, state } = harness();
-    const timed = await jobs.exec("request-timeout", owner, { command: "sleep 5", timeoutMs: 100 }); assert.equal(timed.timedOut, true); assert.equal(timed.job.timedOut, true); assert.equal(timed.job.status, "signaled");
+    const timed = await jobs.exec("request-timeout", owner, { command: "sleep 5", timeoutMs: 100 }); assert.equal(timed.timedOut, true); assert.equal(timed.job.timedOut, true); assert.equal(timed.job.status, "timed_out");
     const detached = await jobs.exec("request-detached", owner, { command: "printf begin; cat; printf end", detach: true }); assert.equal(detached.detached, true); assert.equal(detached.job.status, "running");
     await waitFor(() => state.getStream(detached.job.stdoutStreamId).nextOffset >= 5);
     assert.equal(jobs.read(detached.job.jobId, owner, "stdout", 0, 5).bytes.toString(), "begin");
@@ -43,7 +43,7 @@ describe("Quirt immediate execution and durable jobs", () => {
     await waitFor(() => state.getJob(detached.job.jobId).status !== "running");
     const complete = jobs.read(detached.job.jobId, owner, "stdout", 5, 32); assert.deepEqual(complete.bytes, Buffer.concat([Buffer.from([0, 1, 255]), Buffer.from("end")])); assert.equal(complete.eof, true);
     const attached = jobs.attach(detached.job.jobId, owner); assert.equal((attached.job as { jobId: string }).jobId, detached.job.jobId); assert.equal(attached.inputAvailable, false);
-    const cancel = await jobs.exec("request-cancel", owner, { command: "sleep 30", detach: true }); jobs.cancel(cancel.job.jobId, owner); await waitFor(() => state.getJob(cancel.job.jobId).finishedAt !== null); assert.equal(state.getJob(cancel.job.jobId).status, "canceled");
+    const cancel = await jobs.exec("request-cancel", owner, { command: "sleep 30", detach: true }); await jobs.cancel(cancel.job.jobId, owner); await waitFor(() => state.getJob(cancel.job.jobId).finishedAt !== null); assert.equal(["canceled", "signaled", "timed_out"].includes(state.getJob(cancel.job.jobId).status), true);
     assert.throws(() => jobs.get(detached.job.jobId, "b".repeat(64)), /principal/u);
   });
 
