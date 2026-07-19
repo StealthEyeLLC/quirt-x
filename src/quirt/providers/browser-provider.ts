@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { BrowserContext, Download, Page } from "playwright-core";
 import { QUIRT_POWER_OPERATION_GROUPS, type QuirtPowerOperation } from "../power-catalog.js";
@@ -31,7 +32,9 @@ function safeUrl(value: unknown): string {
 }
 
 async function digestFile(path: string): Promise<{sha256:string;sizeBytes:number}> {
-  const bytes=await readFile(path);return {sha256:createHash("sha256").update(bytes).digest("hex"),sizeBytes:bytes.length};
+  const hash=createHash("sha256");let sizeBytes=0;
+  for await(const chunk of createReadStream(path)){const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);hash.update(bytes);sizeBytes+=bytes.length;}
+  return {sha256:hash.digest("hex"),sizeBytes};
 }
 
 async function directChildProcessIds(): Promise<Set<number>> {
@@ -222,11 +225,13 @@ export class PlaywrightBrowserProvider implements QuirtPowerProviderAdapter {
 
   private async upload(payload: Readonly<Record<string,unknown>>, binary: Buffer, context: QuirtPowerProviderContext): Promise<QuirtPowerProviderResult> {
     const {record,page,pageId}=this.page(payload,context);const selector=requiredText(payload.selector,"Browser upload selector",16_384);
-    let path:string;
-    if(binary.length>0){if(binary.length>8*1024*1024)throw new QuirtError("output_truncated","Inline browser upload exceeds the bounded transfer size");path=join(requiredText(record.configuration.userDataPath,"Stored browser path",32768),"uploads",randomUUID());await mkdir(join(requiredText(record.configuration.userDataPath,"Stored browser path",32768),"uploads"),{recursive:true,mode:0o700});await writeFile(path,binary,{mode:0o600});}
+    let path:string;let temporaryPath:string|null=null;
+    if(binary.length>0){if(binary.length>8*1024*1024)throw new QuirtError("output_truncated","Inline browser upload exceeds the bounded transfer size");const uploads=join(requiredText(record.configuration.userDataPath,"Stored browser path",32768),"uploads");await mkdir(uploads,{recursive:true,mode:0o700});path=join(uploads,randomUUID());await writeFile(path,binary,{mode:0o600});temporaryPath=path;}
     else path=absolutePath(payload.path,"Browser upload path");
-    await page.locator(selector).setInputFiles(path);const digest=await digestFile(path);context.state.power.appendBrowserEvent(record.instanceId,"upload",pageId,{path,digest:digest.sha256,sizeBytes:digest.sizeBytes});
-    return {payload:{instanceId:record.instanceId,pageId,path,...digest},instanceId:record.instanceId};
+    try{
+      await page.locator(selector).setInputFiles(path);const digest=await digestFile(path);context.state.power.appendBrowserEvent(record.instanceId,"upload",pageId,{path,digest:digest.sha256,sizeBytes:digest.sizeBytes,temporary:temporaryPath!==null});
+      return {payload:{instanceId:record.instanceId,pageId,path,...digest,temporary:temporaryPath!==null},instanceId:record.instanceId};
+    }finally{if(temporaryPath!==null)await rm(temporaryPath,{force:true});}
   }
 
   private show(payload: Readonly<Record<string,unknown>>, context: QuirtPowerProviderContext): QuirtPowerProviderResult {

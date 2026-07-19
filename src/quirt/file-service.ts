@@ -214,7 +214,7 @@ export class QuirtFileService {
       if (!exists && input.create !== true && input.replace !== true) throw new QuirtError("not_found", "Quirt file does not exist and creation was not authorized");
       if (exists && (input.expectedDigest !== undefined || input.expectedDevice !== undefined || input.expectedInode !== undefined)) await assertExpected(path, input);
       if (exists && input.followSymlinks !== true && (await lstat(path)).isSymbolicLink()) throw new QuirtError("symlink_conflict", "Quirt write refused a symlink");
-      const atomic = input.atomic ?? (input.append !== true && input.offset === undefined);
+
       const atomic = input.atomic ?? (input.append !== true && input.offset === undefined);
       if (atomic) {
         if (input.append === true || input.offset !== undefined) throw new QuirtError("invalid_request", "Quirt atomic write does not support append or offset mode");
