@@ -173,7 +173,7 @@ export function validateQuirtContractSemantics(
   if (!bundle.authority.afterAuthentication.includes("arbitrary_executable_execution")) issues.push(issue("authority.afterAuthentication", "Raw execution must remain available"));
   if (bundle.authority.unknownOperationBehavior !== "stable_structured_unknown_operation_error") issues.push(issue("authority.unknownOperationBehavior", "Unknown operations must fail cleanly"));
 
-  const rescueDeps = bundle.rescue.forbiddenDependencies;
+  const rescueDeps = bundle.rescue["forbiddenDependencies"];
   if (!Array.isArray(rescueDeps) || !(rescueDeps as string[]).includes("horsey_gateway")) {
     issues.push(issue("rescue.forbiddenDependencies", "Rescue must not depend on Horsey gateway"));
   }

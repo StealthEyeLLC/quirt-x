@@ -122,7 +122,7 @@ function operationDefaults(operationId: string): Pick<
   return {
     binaryInputSupport: binaryIn,
     binaryOutputSupport: binaryOut,
-    streamingMode: /read|follow|attach|replay|capture/u.test(operationId) ? "bounded" : /event/u.test(operationId) ? "event" : "none",
+    streamingMode: /read|follow|attach|replay|capture|watch/u.test(operationId) ? "bounded" : /event/u.test(operationId) ? "event" : "none",
     executionClass: durable ? "durable" : "immediate",
     idempotencyBehavior: readOnly ? "naturally_idempotent" : "semantic_idempotency_required_for_mutations",
     duplicateRequestBehavior: "replay_protected_by_nonce_and_request_hash",
@@ -133,7 +133,7 @@ function operationDefaults(operationId: string): Pick<
     rollbackMethod: readOnly ? "none_required" : "release_or_state_restore_as_applicable",
     verificationMethod: "post_operation_host_state_or_artifact_verification",
     receiptRequirements: "terminal_receipt_required_for_durable_mutations",
-    secretReferenceBehavior: /credential|tunnel|remote|git|host|fleet|ide|desktop/u.test(operationId) ? "secret_reference_only_never_inline" : "none_by_default",
+    secretReferenceBehavior: /credential|tunnel|remote|git|host|fleet|ide|desktop|snapshot/u.test(operationId) ? "secret_reference_only_never_inline" : "none_by_default",
     networkExposure: /network|tunnel|remote|browser|ide|preview|desktop|fleet|host|sync|git/u.test(operationId) ? "may_use_private_network_paths" : "local_host_default",
     dataExposure: readOnly ? "bounded_metadata_and_declared_artifacts" : "bounded_metadata_with_optional_artifact_references",
     healthBehavior: "provider_or_native_health_probe_where_applicable"
