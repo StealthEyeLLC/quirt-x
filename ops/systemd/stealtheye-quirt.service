@@ -1,0 +1,34 @@
+[Unit]
+Description=StealthEye Quirt unrestricted UID-0 terminal supervisor
+Documentation=https://github.com/StealthEyeLLC/stealtheye-fix-operator
+Requires=stealtheye-quirt.socket
+After=local-fs.target stealtheye-quirt.socket
+ConditionFileNotEmpty=/etc/stealtheye-quirt/quirt.env
+ConditionFileNotEmpty=/etc/stealtheye-quirt/authority.key
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/stealtheye-quirt/current
+Environment=QUIRT_MODE=production
+EnvironmentFile=/etc/stealtheye-quirt/quirt.env
+ExecStart=/opt/node-v24.18.0-linux-x64/bin/node /opt/stealtheye-quirt/current/dist/quirt/supervisor-main.js
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+KillMode=process
+UMask=0077
+StateDirectory=stealtheye-quirt
+StateDirectoryMode=0700
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stealtheye-quirt
+LimitNOFILE=1048576
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

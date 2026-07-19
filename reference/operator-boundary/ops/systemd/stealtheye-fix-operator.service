@@ -1,0 +1,50 @@
+[Unit]
+Description=StealthEye Fix Operator private MCP service
+Documentation=https://github.com/StealthEyeLLC/stealtheye-fix-operator
+After=network-online.target fix-privilege-broker.service
+Wants=network-online.target
+Requires=fix-privilege-broker.service
+ConditionFileNotEmpty=/etc/stealtheye-fix-operator/operator.env
+ConditionPathIsSocket=/run/fix/privilege-broker.sock
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=fix-mcp
+Group=fix-broker-client
+SupplementaryGroups=horsey
+WorkingDirectory=/opt/stealtheye-fix-operator/current
+EnvironmentFile=/etc/stealtheye-fix-operator/operator.env
+EnvironmentFile=-/etc/stealtheye-quirt/quirt.env
+ExecStart=/opt/node-v24.18.0-linux-x64/bin/node /opt/stealtheye-fix-operator/current/dist/server.js
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=30s
+TimeoutStopSec=20s
+KillMode=control-group
+UMask=0077
+RuntimeDirectory=stealtheye-fix-operator
+RuntimeDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/opt/stealtheye-fix-operator /etc/stealtheye-fix-operator
+ReadWritePaths=/run/stealtheye-fix-operator /var/lib/stealtheye-fix-operator/data
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
