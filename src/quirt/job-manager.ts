@@ -479,8 +479,8 @@ export class QuirtJobManager {
     });
     child.stdout.on("data", (bytes: Buffer) => this.#append(job, "stdout", bytes));
     child.stderr.on("data", (bytes: Buffer) => this.#append(job, "stderr", bytes));
-    child.once("error", () => void identityPromise.finally(() => this.#finish(job.jobId, handle, null, null, "spawn_failed", form)));
-    child.once("close", (code, signal) => void identityPromise.finally(() => this.#finish(job.jobId, handle, code, signal, this.#terminalStatus(handle, code, signal), form)));
+    child.once("error", () => void identityPromise.finally(() => this.#finish(job.jobId, handle, null, null, "spawn_failed", form)).catch(() => {}));
+    child.once("close", (code, signal) => void identityPromise.finally(() => this.#finish(job.jobId, handle, code, signal, this.#terminalStatus(handle, code, signal), form)).catch(() => {}));
     this.#bindAbort(job.jobId, handle, abortSignal);
     if (base.timeout !== null) {
       clearTimeout(base.timeout);
