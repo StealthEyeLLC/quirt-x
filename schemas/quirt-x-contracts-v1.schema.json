@@ -1,0 +1,543 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stealtheye.local/schemas/quirt-x-contracts-v1.schema.json",
+  "title": "Quirt-X Contract Bundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "product",
+    "architecture",
+    "authority",
+    "protocol",
+    "operations",
+    "providers",
+    "capabilities",
+    "skills",
+    "repair",
+    "release",
+    "update",
+    "rollback",
+    "rescue",
+    "paths",
+    "audit",
+    "receipt",
+    "compatibility",
+    "deprecation",
+    "migrations",
+    "extensionAbi",
+    "statusTaxonomy",
+    "conformance",
+    "extensions"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0.0" },
+    "contractVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "product": { "$ref": "#/$defs/product" },
+    "architecture": { "$ref": "#/$defs/contractSection" },
+    "authority": { "$ref": "#/$defs/authorityContract" },
+    "protocol": { "$ref": "#/$defs/protocolContract" },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/operationDescriptor" },
+      "uniqueItems": true
+    },
+    "providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/providerDescriptor" }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/capabilityDescriptor" }
+    },
+    "skills": { "$ref": "#/$defs/contractSection" },
+    "repair": { "$ref": "#/$defs/contractSection" },
+    "release": { "$ref": "#/$defs/contractSection" },
+    "update": { "$ref": "#/$defs/contractSection" },
+    "rollback": { "$ref": "#/$defs/contractSection" },
+    "rescue": { "$ref": "#/$defs/rescueContract" },
+    "paths": { "$ref": "#/$defs/pathContract" },
+    "audit": { "$ref": "#/$defs/contractSection" },
+    "receipt": { "$ref": "#/$defs/contractSection" },
+    "compatibility": { "$ref": "#/$defs/contractSection" },
+    "deprecation": { "$ref": "#/$defs/contractSection" },
+    "migrations": { "$ref": "#/$defs/contractSection" },
+    "extensionAbi": { "$ref": "#/$defs/contractSection" },
+    "statusTaxonomy": { "$ref": "#/$defs/statusTaxonomy" },
+    "conformance": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/conformanceEntry" }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "programStatus": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "source in progress",
+        "source complete",
+        "validated",
+        "release complete",
+        "deployed",
+        "production accepted",
+        "blocked",
+        "explicitly removed by Jamie"
+      ]
+    },
+    "semanticVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "maxLength": 32
+    },
+    "operationId": {
+      "type": "string",
+      "pattern": "^quirt\\.[a-z0-9]+(?:\\.[a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "providerId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$",
+      "maxLength": 128
+    },
+    "capabilityId": {
+      "type": "string",
+      "pattern": "^quirt\\.[a-z0-9]+(?:\\.[a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "repository", "ownerSubject", "authorityClass"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 256 },
+        "repository": { "type": "string", "const": "StealthEyeLLC/quirt-x" },
+        "ownerSubject": { "type": "string", "const": "stealtheye-owner" },
+        "authorityClass": { "type": "string", "const": "unrestricted-owner" }
+      }
+    },
+    "contractSection": {
+      "type": "object",
+      "required": ["contract", "version"],
+      "additionalProperties": true,
+      "properties": {
+        "contract": { "type": "string", "maxLength": 64 },
+        "version": { "$ref": "#/$defs/semanticVersion" },
+        "implementationStatus": { "$ref": "#/$defs/programStatus" }
+      }
+    },
+    "authorityContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ownerSubject",
+        "authorityClass",
+        "issuerMatching",
+        "subjectMatching",
+        "authorityClassMatching",
+        "beforeAuthentication",
+        "afterAuthentication",
+        "prohibitedAuthorization",
+        "securityMechanisms",
+        "unknownOperationBehavior",
+        "futureOperationInheritance"
+      ],
+      "properties": {
+        "ownerSubject": { "type": "string", "const": "stealtheye-owner" },
+        "authorityClass": { "type": "string", "const": "unrestricted-owner" },
+        "issuerMatching": { "type": "string", "const": "exact_required" },
+        "subjectMatching": { "type": "string", "const": "exact_required" },
+        "authorityClassMatching": { "type": "string", "const": "exact_required" },
+        "beforeAuthentication": { "type": "array", "items": { "type": "string", "maxLength": 128 } },
+        "afterAuthentication": { "type": "array", "items": { "type": "string", "maxLength": 128 } },
+        "prohibitedAuthorization": { "type": "array", "items": { "type": "string", "maxLength": 128 } },
+        "securityMechanisms": { "type": "array", "items": { "type": "string", "maxLength": 128 } },
+        "unknownOperationBehavior": { "type": "string", "maxLength": 128 },
+        "futureOperationInheritance": { "type": "string", "maxLength": 256 }
+      }
+    },
+    "protocolContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "specification",
+        "version",
+        "status",
+        "versions",
+        "currentRuntimeSignatureAlgorithm",
+        "targetSignatureAlgorithm",
+        "q1CryptographicConformance",
+        "publicRootListener",
+        "activeMcpServer",
+        "activeOAuthServer"
+      ],
+      "properties": {
+        "specification": { "type": "string", "const": "QES-2" },
+        "version": { "$ref": "#/$defs/semanticVersion" },
+        "status": { "type": "string", "const": "FROZEN_FOR_Q2_IMPLEMENTATION" },
+        "versions": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/semanticVersion" }
+        },
+        "currentRuntimeSignatureAlgorithm": { "type": "string", "const": "hmac-sha256" },
+        "targetSignatureAlgorithm": { "type": "string", "const": "ed25519" },
+        "q1CryptographicConformance": { "type": "string", "maxLength": 128 },
+        "publicRootListener": { "type": "boolean", "const": false },
+        "activeMcpServer": { "type": "boolean", "const": false },
+        "activeOAuthServer": { "type": "boolean", "const": false }
+      }
+    },
+    "operationDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "operationVersion",
+        "title",
+        "summary",
+        "owner",
+        "implementationModule",
+        "providerId",
+        "capabilityIds",
+        "inputSchemaRef",
+        "outputSchemaRef",
+        "binaryInputSupport",
+        "binaryOutputSupport",
+        "streamingMode",
+        "executionClass",
+        "idempotencyBehavior",
+        "duplicateRequestBehavior",
+        "cancellationBehavior",
+        "timeoutBehavior",
+        "sideEffectClass",
+        "reversibility",
+        "rollbackMethod",
+        "verificationMethod",
+        "receiptRequirements",
+        "secretReferenceBehavior",
+        "networkExposure",
+        "dataExposure",
+        "availabilityState",
+        "healthBehavior",
+        "implementationStatus",
+        "deprecationState"
+      ],
+      "properties": {
+        "operationId": { "$ref": "#/$defs/operationId" },
+        "operationVersion": { "$ref": "#/$defs/semanticVersion" },
+        "title": { "type": "string", "maxLength": 256 },
+        "summary": { "type": "string", "maxLength": 512 },
+        "owner": { "type": "string", "const": "stealtheye-owner" },
+        "implementationModule": { "type": "string", "maxLength": 256 },
+        "providerId": { "type": "string", "maxLength": 128 },
+        "capabilityIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/capabilityId" }
+        },
+        "inputSchemaRef": { "type": "string", "maxLength": 256 },
+        "outputSchemaRef": { "type": "string", "maxLength": 256 },
+        "binaryInputSupport": { "type": "boolean" },
+        "binaryOutputSupport": { "type": "boolean" },
+        "streamingMode": { "type": "string", "enum": ["none", "bounded", "event"] },
+        "executionClass": { "type": "string", "enum": ["immediate", "durable"] },
+        "idempotencyBehavior": { "type": "string", "maxLength": 128 },
+        "duplicateRequestBehavior": { "type": "string", "maxLength": 128 },
+        "cancellationBehavior": { "type": "string", "maxLength": 128 },
+        "timeoutBehavior": { "type": "string", "maxLength": 128 },
+        "sideEffectClass": { "type": "string", "maxLength": 128 },
+        "reversibility": { "type": "string", "maxLength": 128 },
+        "rollbackMethod": { "type": "string", "maxLength": 128 },
+        "verificationMethod": { "type": "string", "maxLength": 128 },
+        "receiptRequirements": { "type": "string", "maxLength": 128 },
+        "secretReferenceBehavior": { "type": "string", "maxLength": 128 },
+        "networkExposure": { "type": "string", "maxLength": 128 },
+        "dataExposure": { "type": "string", "maxLength": 128 },
+        "availabilityState": { "$ref": "#/$defs/programStatus" },
+        "healthBehavior": { "type": "string", "maxLength": 128 },
+        "implementationStatus": { "$ref": "#/$defs/programStatus" },
+        "deprecationState": {
+          "type": "string",
+          "enum": ["active", "deprecated", "migration_available", "disabled_by_default", "removed"]
+        }
+      }
+    },
+    "providerDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerId",
+        "semanticVersion",
+        "providerFamily",
+        "implementationModule",
+        "installationState",
+        "supportedOperations",
+        "requiredHostCapabilities",
+        "requiredKernelCapabilities",
+        "requiredConfiguration",
+        "authenticationNeeds",
+        "secretReferences",
+        "dataDirectories",
+        "activeInstanceModel",
+        "healthModel",
+        "currentLimitations",
+        "fallbackChain",
+        "installationMethod",
+        "upgradeMethod",
+        "repairMethod",
+        "disableMethod",
+        "removalMethod",
+        "reversibility",
+        "rollbackMethod",
+        "verificationMethod",
+        "cost",
+        "networkExposure",
+        "dataExposure",
+        "license",
+        "sourceRepository",
+        "sourceVersion",
+        "sourceDigestRule",
+        "implementationStatus",
+        "lifecycleVerbs"
+      ],
+      "properties": {
+        "providerId": { "$ref": "#/$defs/providerId" },
+        "semanticVersion": { "$ref": "#/$defs/semanticVersion" },
+        "providerFamily": { "type": "string", "maxLength": 64 },
+        "implementationModule": { "type": "string", "maxLength": 256 },
+        "installationState": { "$ref": "#/$defs/programStatus" },
+        "executableVersion": { "type": ["string", "null"], "maxLength": 64 },
+        "supportedOperations": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/operationId" }
+        },
+        "requiredHostCapabilities": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 128 } },
+        "requiredKernelCapabilities": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 128 } },
+        "requiredConfiguration": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 128 } },
+        "authenticationNeeds": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 128 } },
+        "secretReferences": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 128 } },
+        "dataDirectories": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 256 } },
+        "activeInstanceModel": { "type": "string", "maxLength": 128 },
+        "healthModel": { "type": "string", "maxLength": 128 },
+        "currentLimitations": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 512 } },
+        "fallbackChain": { "type": "array", "maxItems": 16, "items": { "type": "string", "maxLength": 128 } },
+        "installationMethod": { "type": "string", "maxLength": 128 },
+        "upgradeMethod": { "type": "string", "maxLength": 128 },
+        "repairMethod": { "type": "string", "maxLength": 128 },
+        "disableMethod": { "type": "string", "maxLength": 128 },
+        "removalMethod": { "type": "string", "maxLength": 128 },
+        "reversibility": { "type": "string", "maxLength": 128 },
+        "rollbackMethod": { "type": "string", "maxLength": 128 },
+        "verificationMethod": { "type": "string", "maxLength": 128 },
+        "cost": { "type": "string", "maxLength": 128 },
+        "networkExposure": { "type": "string", "maxLength": 128 },
+        "dataExposure": { "type": "string", "maxLength": 128 },
+        "license": { "type": "string", "maxLength": 128 },
+        "sourceRepository": { "type": "string", "maxLength": 256 },
+        "sourceVersion": { "type": "string", "maxLength": 64 },
+        "sourceDigestRule": { "type": "string", "maxLength": 128 },
+        "implementationStatus": { "$ref": "#/$defs/programStatus" },
+        "lifecycleVerbs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "type": "string", "maxLength": 32 }
+        }
+      }
+    },
+    "capabilityDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilityId",
+        "semanticVersion",
+        "humanName",
+        "description",
+        "owner",
+        "implementationOwner",
+        "providerId",
+        "operations",
+        "operationSchemas",
+        "availability",
+        "health",
+        "installationMethod",
+        "authenticationNeeds",
+        "secretReferences",
+        "profile",
+        "driver",
+        "reversibility",
+        "rollbackMethod",
+        "verificationMethod",
+        "cost",
+        "networkExposure",
+        "dataExposure",
+        "license",
+        "sourceProvenance",
+        "implementationStatus",
+        "limitations",
+        "dependencyCapabilityIds",
+        "fallbackCapabilityIds"
+      ],
+      "properties": {
+        "capabilityId": { "$ref": "#/$defs/capabilityId" },
+        "semanticVersion": { "$ref": "#/$defs/semanticVersion" },
+        "humanName": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 512 },
+        "owner": { "type": "string", "const": "stealtheye-owner" },
+        "implementationOwner": { "type": "string", "enum": ["Horsey", "Neigh", "Fix", "Quirt"] },
+        "providerId": { "type": ["string", "null"], "maxLength": 128 },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/operationId" }
+        },
+        "operationSchemas": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "type": "string", "maxLength": 256 }
+        },
+        "availability": { "$ref": "#/$defs/programStatus" },
+        "health": { "type": "string", "maxLength": 128 },
+        "installationMethod": { "type": "string", "maxLength": 128 },
+        "authenticationNeeds": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 128 } },
+        "secretReferences": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 128 } },
+        "profile": { "type": ["string", "null"], "maxLength": 128 },
+        "driver": { "type": ["string", "null"], "maxLength": 128 },
+        "reversibility": { "type": "string", "maxLength": 128 },
+        "rollbackMethod": { "type": "string", "maxLength": 128 },
+        "verificationMethod": { "type": "string", "maxLength": 128 },
+        "cost": { "type": "string", "maxLength": 128 },
+        "networkExposure": { "type": "string", "maxLength": 128 },
+        "dataExposure": { "type": "string", "maxLength": 128 },
+        "license": { "type": "string", "maxLength": 256 },
+        "sourceProvenance": { "type": "string", "maxLength": 256 },
+        "implementationStatus": { "$ref": "#/$defs/programStatus" },
+        "limitations": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 512 } },
+        "dependencyCapabilityIds": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/capabilityId" }
+        },
+        "fallbackCapabilityIds": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/capabilityId" }
+        }
+      }
+    },
+    "pathContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "socket",
+        "stateRoot",
+        "stateSubpaths",
+        "configRoot",
+        "configFiles",
+        "releaseRoot",
+        "daemonUid"
+      ],
+      "properties": {
+        "socket": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "owner", "group", "mode", "persistence", "publicListener"],
+          "properties": {
+            "path": { "type": "string", "const": "/run/horsey/quirt.sock" },
+            "owner": { "type": "string", "const": "root" },
+            "group": { "type": "string", "const": "horsey" },
+            "mode": { "type": "string", "const": "0660" },
+            "persistence": { "type": "string", "const": "ephemeral_runtime" },
+            "publicListener": { "type": "boolean", "const": false }
+          }
+        },
+        "stateRoot": { "type": "string", "const": "/var/lib/stealtheye-quirt" },
+        "stateSubpaths": { "type": "array", "minItems": 1, "items": { "type": "string", "maxLength": 128 } },
+        "configRoot": { "type": "string", "const": "/etc/stealtheye-quirt" },
+        "configFiles": { "type": "array", "minItems": 1, "items": { "type": "string", "maxLength": 128 } },
+        "releaseRoot": { "type": "string", "const": "/opt/stealtheye-quirt" },
+        "daemonUid": { "type": "integer", "const": 0 }
+      }
+    },
+    "rescueContract": {
+      "allOf": [
+        { "$ref": "#/$defs/contractSection" },
+        {
+          "type": "object",
+          "required": ["forbiddenDependencies"],
+          "properties": {
+            "forbiddenDependencies": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "maxLength": 128 }
+            }
+          }
+        }
+      ]
+    },
+    "statusTaxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statusTaxonomy", "phases"],
+      "properties": {
+        "statusTaxonomy": {
+          "type": "array",
+          "minItems": 9,
+          "maxItems": 9,
+          "items": { "$ref": "#/$defs/programStatus" }
+        },
+        "phases": {
+          "type": "array",
+          "minItems": 27,
+          "maxItems": 27,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["phase", "status", "notes"],
+            "properties": {
+              "phase": { "type": "string", "pattern": "^Q([0-9]|1[0-9]|2[0-6])$" },
+              "status": { "$ref": "#/$defs/programStatus" },
+              "notes": { "type": "string", "maxLength": 512 }
+            }
+          }
+        }
+      }
+    },
+    "conformanceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "area",
+        "targetContract",
+        "currentSourceBehavior",
+        "implementationStatus",
+        "firstPlannedPhase",
+        "evidence",
+        "knownGap",
+        "acceptableInQ1"
+      ],
+      "properties": {
+        "area": { "type": "string", "maxLength": 128 },
+        "targetContract": { "type": "string", "maxLength": 512 },
+        "currentSourceBehavior": { "type": "string", "maxLength": 512 },
+        "implementationStatus": { "$ref": "#/$defs/programStatus" },
+        "firstPlannedPhase": { "type": "string", "maxLength": 16 },
+        "evidence": { "type": "string", "maxLength": 512 },
+        "knownGap": { "type": "string", "maxLength": 512 },
+        "acceptableInQ1": { "type": "boolean" }
+      }
+    }
+  }
+}
