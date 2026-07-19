@@ -1,0 +1,17 @@
+[Unit]
+Description=StealthEye Quirt private root-supervisor socket
+Documentation=https://github.com/StealthEyeLLC/stealtheye-fix-operator
+
+[Socket]
+ListenStream=/run/horsey/quirt.sock
+SocketUser=root
+SocketGroup=horsey
+SocketMode=0660
+DirectoryMode=0750
+Accept=no
+RemoveOnStop=yes
+Service=stealtheye-quirt.service
+Backlog=128
+
+[Install]
+WantedBy=sockets.target
