@@ -32,3 +32,7 @@ export function quirtEnvironment(shell: string, extra: Readonly<Record<string, s
   if (totalBytes > 256 * 1024) throw new QuirtError("invalid_request", "Quirt environment is too large");
   return Object.freeze(base);
 }
+
+export function mutableSpawnEnvironment(values: Readonly<Record<string, string>>): Record<string, string> {
+  return { ...values };
+}

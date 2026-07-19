@@ -113,5 +113,7 @@ export function safeQuirtError(value: unknown): QuirtError {
 }
 
 export function errorCode(value: unknown): QuirtErrorCode {
-  return value instanceof QuirtError ? value.code : "internal_error";
+  if (value instanceof QuirtError) return value.code;
+  if (typeof value === "object" && value !== null && "code" in value && typeof (value as QuirtError).code === "string") return quirtErrorCode((value as QuirtError).code);
+  return "internal_error";
 }

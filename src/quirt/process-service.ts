@@ -12,7 +12,9 @@ import type { QuirtStateStore } from "./state.js";
 const execute = promisify(execFile);
 const MAX_PROCESS_RESULT = 4 * 1024 * 1024;
 
-export interface QuirtProcessIdentity { pid: number; startTimeTicks: number; bootId: string; pidNamespace: string | null; executableDevice: number | null; executableInode: number | null; }
+import type { QuirtProcessIdentity } from "./process-identity.js";
+
+export type { QuirtProcessIdentity };
 
 interface ProcStat { state: string; parentPid: number; processGroup: number; sessionId: number; ttyNumber: number; userTicks: number; systemTicks: number; startTimeTicks: number; virtualBytes: number; residentPages: number; }
 
