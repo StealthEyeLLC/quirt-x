@@ -26,9 +26,9 @@
     "b3df534c854a795a81dd4ffc057766d57c565690"
   ],
   "validationTimestamp": "2026-07-19T08:55:32.424974+00:00",
-  "finalDestinationCommit": "b545a52dab6d9240fec5e32bd077b6bd65acec07",
-  "finalDestinationTree": "ac1aa304591ffd7d0314f72098334f292eb10b54",
-  "remoteReadbackStatus": "pending-push",
+  "finalDestinationCommit": "f531b0a9422d27548b7ccd23c7aa51d3b32d2eef",
+  "finalDestinationTree": "bc9c59d0ec47d3b80e8767782a02cd113396d8c4",
+  "remoteReadbackStatus": "verified",
   "extractionStatus": "complete",
   "records": [
     {
