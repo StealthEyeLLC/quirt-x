@@ -69,7 +69,7 @@ describe("Quirt architecture contract invariants", () => {
       assert.ok(bundle.authority.prohibitedAuthorization.includes(forbidden), forbidden);
     }
     assert.ok(bundle.authority.afterAuthentication.includes("arbitrary_executable_execution"));
-    assert.equal(String(bundle.skills.powerInvariant).includes("does_not_remove_unrestricted_owner_execution"), true);
+    assert.equal(String(bundle.skills["powerInvariant"]).includes("does_not_remove_unrestricted_owner_execution"), true);
   });
 
   it("keeps active runtime free of public MCP server code and SDK dependencies", () => {
@@ -90,7 +90,7 @@ describe("Quirt architecture contract invariants", () => {
     assert.match(socket, /^SocketUser=root$/mu);
     assert.match(socket, /^SocketGroup=horsey$/mu);
     assert.match(socket, /^SocketMode=0660$/mu);
-    const rescueDeps = buildQuirtContractBundle().rescue.forbiddenDependencies as string[];
+    const rescueDeps = buildQuirtContractBundle().rescue["forbiddenDependencies"] as string[];
     assert.ok(rescueDeps.includes("horsey_gateway"));
     assert.ok(rescueDeps.includes("oauth"));
   });
