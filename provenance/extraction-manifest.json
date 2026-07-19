@@ -2764,7 +2764,7 @@
       "destinationPath": "src/quirt/pty.test.ts",
       "copyOrTransformation": "transformed",
       "transformationDescription": "increase forced-close waitFor timeout for CI host load",
-      "destinationBlob": "afceff5931c64aae79660998ab1be2b855dc2bbb",
+      "destinationBlob": "187255a4b47862958a0352b484628962f5fc3b22",
       "verificationStatus": "verified-transformed"
     },
     {

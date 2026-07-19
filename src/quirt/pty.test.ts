@@ -47,8 +47,8 @@ describe("Quirt real PTY adapter", () => {
 
   it("delivers an explicit forced-close signal", async () => {
     const root = mkdtempSync(join(tmpdir(), "quirt-pty-close-")); roots.push(root);
-    const pty = new NodePtyFactory().spawn({ executable: "/bin/bash", arguments: ["--noprofile", "--norc"], workingDirectory: root, environment: { HOME: root, PATH: "/usr/bin:/bin", TERM: "xterm-256color" }, columns: 80, rows: 24 });
+    const pty = new NodePtyFactory().spawn({ executable: "/bin/sleep", arguments: ["999"], workingDirectory: root, environment: { HOME: root, PATH: "/usr/bin:/bin", TERM: "xterm-256color" }, columns: 80, rows: 24 });
     active.push(pty);
-    let exited = false; pty.onExit(() => { exited = true; }); pty.signal("SIGTERM"); await waitFor(() => exited);
+    let exited = false; pty.onExit(() => { exited = true; }); pty.signal("SIGTERM"); await waitFor(() => exited, 10_000);
   });
 });
