@@ -1,4 +1,5 @@
 import { access, stat } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import { constants } from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -7,7 +8,7 @@ import type { QuirtConfig } from "./config.js";
 import { LinuxCoreDumpProbe, type CoreDumpProbe } from "./core-dump.js";
 import { resolveEnvironment, type QuirtEnvironmentPolicy } from "./execution-environment.js";
 import { buildExecutionReceipt } from "./execution-receipt.js";
-import { runTermination, RealTerminationClock, type TerminationClock } from "./execution-termination.js";
+import { deliverProcessSignal, resolveProcessSignalTarget, runTermination, RealTerminationClock, type TerminationClock } from "./execution-termination.js";
 import { QuirtError, errorCode } from "./error.js";
 import { mutableSpawnEnvironment } from "./environment.js";
 import { buildLaunchDocument, digestBuffer, digestText, type QuirtLaunchForm } from "./launch-document.js";
@@ -24,7 +25,7 @@ import {
   type ProcReader,
   type QuirtProcessIdentity
 } from "./process-identity.js";
-import { LinuxResourceProbe, sampleResourceEvidence, type ResourceProbe } from "./resource-accounting.js";
+import { DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS, LinuxResourceProbe, ResourceAccumulator, type ResourceProbe } from "./resource-accounting.js";
 import type { QuirtJobRecord, QuirtStateStore, QuirtStreamPage } from "./state.js";
 
 const SIGNALS = new Set<NodeJS.Signals>([
@@ -93,11 +94,17 @@ interface BaseHandle {
   stdinDigest: string | null;
   inputClosed: boolean;
   terminationStarted: boolean;
+  resourceAccumulator: ResourceAccumulator | null;
 }
 
 interface ChildHandle extends BaseHandle { kind: "child"; process: ChildProcessWithoutNullStreams; }
 interface PtyHandle extends BaseHandle { kind: "pty"; process: QuirtPtyProcess; }
 type JobHandle = ChildHandle | PtyHandle;
+
+export interface PathValidation {
+  stat(path: string): Promise<Stats>;
+  access(path: string, mode: number): Promise<void>;
+}
 
 export interface QuirtJobManagerDependencies {
   procReader?: ProcReader;
@@ -106,6 +113,8 @@ export interface QuirtJobManagerDependencies {
   clock?: TerminationClock;
   spawnProcess?: typeof spawn;
   killProcess?: (pid: number, signal: NodeJS.Signals | number) => void;
+  pathValidation?: PathValidation;
+  resourceSampleIntervalMs?: number;
 }
 
 function boundedCommand(value: string, label: string, maximum = 1024 * 1024): string {
@@ -170,28 +179,36 @@ function launch(input: QuirtExecInput, shellPath: string): {
   };
 }
 
-async function validateWorkingDirectory(path: string): Promise<void> {
+async function validateWorkingDirectory(path: string, paths: PathValidation): Promise<void> {
   if (!isAbsolute(path) || path.includes("\0")) throw new QuirtError("invalid_request", "Quirt working directory is invalid");
+  let stats: Stats;
   try {
-    await access(path, constants.F_OK);
-  } catch {
+    stats = await paths.stat(path);
+  } catch (cause) {
+    const code = cause instanceof Error && "code" in cause ? cause.code : null;
+    if (code === "ENOENT") throw new QuirtError("invalid_request", "Quirt working directory was not found");
     throw new QuirtError("invalid_request", "Quirt working directory was not found");
   }
+  if (!stats.isDirectory()) throw new QuirtError("invalid_request", "Quirt working directory is not a directory");
   try {
-    await access(path, constants.R_OK | constants.X_OK);
+    await paths.access(path, constants.R_OK | constants.X_OK);
   } catch {
     throw new QuirtError("authorization_failed", "Quirt working directory permission was denied");
   }
 }
 
-async function validateExecutable(path: string): Promise<void> {
+async function validateExecutable(path: string, paths: PathValidation): Promise<void> {
+  let stats: Stats;
   try {
-    await access(path, constants.F_OK);
-  } catch {
+    stats = await paths.stat(path);
+  } catch (cause) {
+    const code = cause instanceof Error && "code" in cause ? cause.code : null;
+    if (code === "ENOENT") throw new QuirtError("executable_missing", "Quirt executable was not found");
     throw new QuirtError("executable_missing", "Quirt executable was not found");
   }
+  if (!stats.isFile()) throw new QuirtError("invalid_request", "Quirt executable is not a file");
   try {
-    await access(path, constants.X_OK);
+    await paths.access(path, constants.X_OK);
   } catch {
     throw new QuirtError("authorization_failed", "Quirt executable permission was denied");
   }
@@ -206,6 +223,8 @@ export class QuirtJobManager {
   readonly #clock: TerminationClock;
   readonly #spawnProcess: typeof spawn;
   readonly #killProcess: (pid: number, signal: NodeJS.Signals | number) => void;
+  readonly #pathValidation: PathValidation;
+  readonly #resourceSampleIntervalMs: number;
 
   constructor(
     private readonly config: QuirtConfig,
@@ -219,6 +238,8 @@ export class QuirtJobManager {
     this.#clock = dependencies.clock ?? new RealTerminationClock();
     this.#spawnProcess = dependencies.spawnProcess ?? spawn;
     this.#killProcess = dependencies.killProcess ?? ((pid, signal) => process.kill(pid, signal));
+    this.#pathValidation = dependencies.pathValidation ?? { stat, access };
+    this.#resourceSampleIntervalMs = dependencies.resourceSampleIntervalMs ?? DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS;
   }
 
   onEvent(listener: (event: QuirtJobEvent) => void): () => void {
@@ -259,8 +280,8 @@ export class QuirtJobManager {
     const shellPath = input.shellPath ?? this.config.shellPath;
     const launched = launch(input, shellPath);
     const workingDirectory = input.workingDirectory ?? ((process.getuid?.() ?? 0) === 0 ? "/root" : process.cwd());
-    await validateWorkingDirectory(workingDirectory);
-    await validateExecutable(launched.executable);
+    await validateWorkingDirectory(workingDirectory, this.#pathValidation);
+    await validateExecutable(launched.executable, this.#pathValidation);
     const environmentPolicy: QuirtEnvironmentPolicy = {
       environment: input.environmentPolicy?.environment ?? input.environment,
       unsetEnvironment: input.environmentPolicy?.unsetEnvironment,
@@ -296,7 +317,7 @@ export class QuirtJobManager {
     const handle = input.pty === true
       ? await this.#spawnPty(job, launched.executable, launched.arguments, workingDirectory, resolved.values, input, launched.form, abortSignal)
       : await this.#spawnChild(job, launched.executable, launched.arguments, workingDirectory, resolved.values, input, launched.form, abortSignal);
-    this.#handles.set(job.jobId, handle);
+    if (!this.#handles.has(job.jobId)) this.#handles.set(job.jobId, handle);
     if (input.input !== undefined && input.input.length > 0) {
       handle.stdinBytes = input.input.length;
       handle.stdinDigest = stdinDigest;
@@ -357,12 +378,15 @@ export class QuirtJobManager {
     try {
       if (handle.kind === "pty") handle.process.signal(signal);
       else {
-        const pgid = handle.identity?.processGroupId ?? handle.process.pid ?? record.processId;
-        if (pgid === null || pgid < 2) throw new Error("missing process identity");
-        this.#killProcess(-pgid, signal);
+        const target = resolveProcessSignalTarget(handle.identity, handle.process.pid ?? record.processId);
+        if (target.mode === "group") this.#killProcess(-target.pgid, signal);
+        else this.#killProcess(target.pid, signal);
       }
     } catch (cause) {
       if (cause instanceof QuirtError) throw cause;
+      if (cause instanceof Error && "code" in cause && cause.code === "EPERM") {
+        throw new QuirtError("authorization_failed", "Quirt job signal permission was denied");
+      }
       throw new QuirtError("not_found", "Quirt job process is unavailable");
     }
     return this.state.getJob(jobId);
@@ -401,6 +425,7 @@ export class QuirtJobManager {
   shutdown(): void {
     for (const [jobId, handle] of this.#handles) {
       if (handle.timeout !== null) clearTimeout(handle.timeout);
+      handle.resourceAccumulator?.stop();
       const record = this.state.getJob(jobId);
       if (!TERMINAL_STATUSES.has(record.status)) {
         this.state.updateJob(jobId, { status: record.processId !== null ? "unknown" : "lost" });
@@ -439,7 +464,8 @@ export class QuirtJobManager {
       stdinBytes: 0,
       stdinDigest: null,
       inputClosed: false,
-      terminationStarted: false
+      terminationStarted: false,
+      resourceAccumulator: null
     };
     if (timeoutMs !== undefined) {
       if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 24 * 60 * 60 * 1000) throw new QuirtError("invalid_request", "Quirt execution timeout is invalid");
@@ -468,14 +494,24 @@ export class QuirtJobManager {
       throw new QuirtError("internal_error", "Quirt execution could not start");
     }
     const handle: ChildHandle = { ...base, kind: "child", process: child };
+    this.#handles.set(job.jobId, handle);
     const identityPromise = new Promise<QuirtProcessIdentity>((resolve, reject) => {
+      let settled = false;
+      const settle = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        action();
+      };
       const capture = () => {
-        try { resolve(captureProcessIdentitySync(child.pid!, this.#procReader)); }
-        catch (cause) { reject(cause); }
+        try { settle(() => resolve(captureProcessIdentitySync(child.pid!, this.#procReader))); }
+        catch (cause) { settle(() => reject(cause)); }
       };
       if (child.pid !== undefined && child.pid >= 2) capture();
-      else child.once("spawn", capture);
-      child.once("error", reject);
+      else {
+        child.once("spawn", capture);
+        child.once("close", () => settle(() => reject(new QuirtError("process_exited", "Quirt process exited before identity capture", true))));
+      }
+      child.once("error", cause => settle(() => reject(cause)));
     });
     child.stdout.on("data", (bytes: Buffer) => this.#append(job, "stdout", bytes));
     child.stderr.on("data", (bytes: Buffer) => this.#append(job, "stderr", bytes));
@@ -494,16 +530,22 @@ export class QuirtJobManager {
     try {
       const identity = await identityPromise;
       handle.identity = identity;
-      this.state.updateJob(job.jobId, {
-        status: "running",
-        processId: identity.pid,
-        processIdentity: identity as unknown as Record<string, unknown>,
-        observedExecutable: identity.executablePath ?? null,
-        observedWorkingDirectory: identity.workingDirectory ?? null,
-        started: true
-      });
-      this.#emitState(job, "running");
+      handle.resourceAccumulator = new ResourceAccumulator(identity.pid, this.#resourceProbe, this.#resourceSampleIntervalMs);
+      void handle.resourceAccumulator.start();
+      const current = this.state.getJob(job.jobId);
+      if (!TERMINAL_STATUSES.has(current.status)) {
+        this.state.updateJob(job.jobId, {
+          status: "running",
+          processId: identity.pid,
+          processIdentity: identity as unknown as Record<string, unknown>,
+          observedExecutable: identity.executablePath ?? null,
+          observedWorkingDirectory: identity.workingDirectory ?? null,
+          started: true
+        });
+        this.#emitState(job, "running");
+      }
     } catch (cause) {
+      handle.resourceAccumulator?.stop();
       this.state.updateJob(job.jobId, { status: "spawn_failed", finished: true });
       throw cause instanceof QuirtError ? cause : new QuirtError("internal_error", "Quirt execution identity capture failed");
     }
@@ -523,6 +565,7 @@ export class QuirtJobManager {
     const base = this.#baseHandle(input.timeoutMs);
     const pty = this.ptys.spawn({ executable, arguments: argumentsList, workingDirectory: cwd, environment: mutableSpawnEnvironment(env), columns: input.columns ?? 120, rows: input.rows ?? 40 });
     const handle: PtyHandle = { ...base, kind: "pty", process: pty };
+    this.#handles.set(job.jobId, handle);
     this.#bindAbort(job.jobId, handle, abortSignal);
     if (base.timeout !== null) {
       clearTimeout(base.timeout);
@@ -542,16 +585,22 @@ export class QuirtJobManager {
         identity = syntheticProcessIdentity(pty.pid, await this.#procReader.readBootId());
       }
       handle.identity = identity;
-      this.state.updateJob(job.jobId, {
-        status: "running",
-        processId: identity.pid,
-        processIdentity: identity as unknown as Record<string, unknown>,
-        observedExecutable: identity.executablePath ?? null,
-        observedWorkingDirectory: identity.workingDirectory ?? null,
-        started: true
-      });
-      this.#emitState(job, "running");
+      handle.resourceAccumulator = new ResourceAccumulator(identity.pid, this.#resourceProbe, this.#resourceSampleIntervalMs);
+      void handle.resourceAccumulator.start();
+      const current = this.state.getJob(job.jobId);
+      if (!TERMINAL_STATUSES.has(current.status)) {
+        this.state.updateJob(job.jobId, {
+          status: "running",
+          processId: identity.pid,
+          processIdentity: identity as unknown as Record<string, unknown>,
+          observedExecutable: identity.executablePath ?? null,
+          observedWorkingDirectory: identity.workingDirectory ?? null,
+          started: true
+        });
+        this.#emitState(job, "running");
+      }
     } catch (cause) {
+      handle.resourceAccumulator?.stop();
       this.state.updateJob(job.jobId, { status: "spawn_failed", finished: true });
       throw cause instanceof QuirtError ? cause : new QuirtError("internal_error", "Quirt execution identity capture failed");
     }
@@ -627,12 +676,14 @@ export class QuirtJobManager {
   }
 
   async #finish(jobId: string, handle: JobHandle, exitCode: number | null, signal: string | null, status: QuirtJobRecord["status"], form: QuirtLaunchForm): Promise<void> {
-    if (!this.#handles.has(jobId)) return;
+    const tracked = this.#handles.get(jobId) ?? handle;
     if (handle.timeout !== null) clearTimeout(handle.timeout);
+    handle.resourceAccumulator?.stop();
+    await handle.resourceAccumulator?.sampleOnce();
     const before = this.state.getJob(jobId);
     if (TERMINAL_STATUSES.has(before.status) && before.receiptId !== null) {
-      handle.resolve(before);
-      this.#handles.delete(jobId);
+      tracked.resolve(before);
+      if (this.#handles.get(jobId) === tracked) this.#handles.delete(jobId);
       return;
     }
     for (const streamId of [before.stdoutStreamId, before.stderrStreamId]) if (this.state.getStream(streamId).status === "open") this.state.finalizeStream(streamId);
@@ -640,7 +691,9 @@ export class QuirtJobManager {
     const stderrDigest = before.ptyStreamModel === "combined" ? { digest: null, complete: false, byteCount: 0 } : this.state.streamDigest(before.stderrStreamId);
     const finishedAt = new Date().toISOString();
     const startedAtMs = before.startedAt === null ? this.#clock.now() : Date.parse(before.startedAt);
-    const resourceEvidence = before.processId === null ? null : await sampleResourceEvidence(before.processId, startedAtMs, this.#clock.now(), this.#resourceProbe);
+    const resourceEvidence = handle.resourceAccumulator === null
+      ? (before.processId === null ? null : new ResourceAccumulator(before.processId, this.#resourceProbe, this.#resourceSampleIntervalMs).finalize(startedAtMs, this.#clock.now()))
+      : handle.resourceAccumulator.finalize(startedAtMs, this.#clock.now());
     const coreDump = await this.#coreDumpProbe.inspect(exitCode, signal, before.processId ?? 0);
     const cgroupIdentity = before.processId === null ? null : await captureCgroupIdentity(before.processId, this.#procReader);
     const namespaceIdentities = before.processId === null ? null : await captureNamespaceIdentities(before.processId, this.#procReader);
@@ -700,8 +753,8 @@ export class QuirtJobManager {
       receipt: receipt as unknown as Record<string, unknown>
     });
     const record = this.state.updateJob(jobId, { status, exitCode, exitSignal: signal, timedOut: handle.timedOut, finished: true, receiptId: stored.receiptId });
-    this.#handles.delete(jobId);
-    handle.resolve(record);
+    if (this.#handles.get(jobId) === tracked) this.#handles.delete(jobId);
+    tracked.resolve(record);
     this.#emitState(before, status, record.receiptId);
   }
 

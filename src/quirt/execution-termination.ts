@@ -34,6 +34,64 @@ export class RealTerminationClock implements TerminationClock {
   async sleep(ms: number): Promise<void> { await new Promise(resolve => setTimeout(resolve, ms)); }
 }
 
+interface ScheduledSleep {
+  until: number;
+  resolve: () => void;
+}
+
+export class FakeTerminationClock implements TerminationClock {
+  #now = 0;
+  readonly #sleepers: ScheduledSleep[] = [];
+
+  now(): number { return this.#now; }
+
+  advance(ms: number): void {
+    this.#now += ms;
+    for (let index = this.#sleepers.length - 1; index >= 0; index -= 1) {
+      const sleeper = this.#sleepers[index]!;
+      if (sleeper.until <= this.#now) {
+        this.#sleepers.splice(index, 1);
+        sleeper.resolve();
+      }
+    }
+  }
+
+  async sleep(ms: number): Promise<void> {
+    await new Promise<void>(resolve => {
+      this.#sleepers.push({ until: this.#now + ms, resolve });
+    });
+  }
+}
+
+export function resolveProcessSignalTarget(
+  identity: QuirtProcessIdentity | null,
+  fallbackPid: number | null
+): { mode: "group"; pgid: number } | { mode: "process"; pid: number } {
+  const pgid = identity?.processGroupId;
+  if (pgid !== null && pgid !== undefined && pgid >= 2) return { mode: "group", pgid };
+  const pid = identity?.pid ?? fallbackPid;
+  if (pid === null || pid < 2) throw new Error("missing process identity");
+  return { mode: "process", pid };
+}
+
+export function deliverProcessSignal(
+  input: {
+    identity: QuirtProcessIdentity;
+    pty: boolean;
+    signal: NodeJS.Signals;
+    signaler: ProcessSignaler;
+    fallbackPid?: number | null;
+  }
+): void {
+  if (input.pty && input.signaler.signalPty !== undefined) {
+    input.signaler.signalPty(input.signal);
+    return;
+  }
+  const target = resolveProcessSignalTarget(input.identity, input.fallbackPid ?? input.identity.pid);
+  if (target.mode === "group") input.signaler.signalProcessGroup(target.pgid, input.signal);
+  else input.signaler.signalProcess(target.pid, input.signal);
+}
+
 export async function runTermination(
   input: {
     identity: QuirtProcessIdentity;
@@ -53,10 +111,10 @@ export async function runTermination(
   const escalate = input.options?.escalate !== false;
   let escalated = false;
   let forcedSignal: NodeJS.Signals | null = null;
+  let processExited = false;
+  const exitPromise = input.waitForExit().then(() => { processExited = true; }, () => { processExited = true; });
   const deliver = (signal: NodeJS.Signals) => {
-    if (input.pty && input.signaler.signalPty !== undefined) input.signaler.signalPty(signal);
-    else if (input.identity.processGroupId !== null && input.identity.processGroupId !== undefined && input.identity.processGroupId >= 2) input.signaler.signalProcessGroup(input.identity.processGroupId, signal);
-    else input.signaler.signalProcess(input.identity.pid, signal);
+    deliverProcessSignal({ identity: input.identity, pty: input.pty, signal, signaler: input.signaler });
   };
   if (input.reason === "forced_cancel") {
     forcedSignal = "SIGKILL";
@@ -66,13 +124,17 @@ export async function runTermination(
     await input.verifyIdentity();
     deliver(gracefulSignal);
     const deadline = input.clock.now() + graceIntervalMs;
-    while (input.clock.now() < deadline) {
+    while (input.clock.now() < deadline && !processExited) {
       if (input.abort?.aborted === true) break;
-      try { await Promise.race([input.waitForExit(), input.clock.sleep(Math.min(50, deadline - input.clock.now()))]); break; }
-      catch { /* continue waiting */ }
-      if (input.clock.now() >= deadline) break;
+      const remaining = deadline - input.clock.now();
+      if (remaining <= 0) break;
+      const winner = await Promise.race([
+        exitPromise.then(() => "exit" as const),
+        input.clock.sleep(Math.min(50, remaining)).then(() => "sleep" as const)
+      ]);
+      if (winner === "exit" || processExited) break;
     }
-    if (escalate) {
+    if (!processExited && escalate) {
       try {
         await input.verifyIdentity();
         escalated = true;
@@ -81,7 +143,7 @@ export async function runTermination(
       } catch { /* process already exited */ }
     }
   }
-  try { await input.waitForExit(); } catch { /* race */ }
+  try { await exitPromise; } catch { /* race */ }
   return Object.freeze({
     reason: input.reason,
     requestedAt,
