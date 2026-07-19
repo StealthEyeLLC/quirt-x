@@ -26,10 +26,10 @@
     "b3df534c854a795a81dd4ffc057766d57c565690"
   ],
   "validationTimestamp": "2026-07-19T08:55:32.424974+00:00",
-  "finalDestinationCommit": null,
-  "finalDestinationTree": null,
-  "remoteReadbackStatus": "pending",
-  "extractionStatus": "transformations-applied",
+  "finalDestinationCommit": "b545a52dab6d9240fec5e32bd077b6bd65acec07",
+  "finalDestinationTree": "ac1aa304591ffd7d0314f72098334f292eb10b54",
+  "remoteReadbackStatus": "pending-push",
+  "extractionStatus": "complete",
   "records": [
     {
       "sourceRepository": "StealthEyeLLC/stealtheye-fix-operator",
