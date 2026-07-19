@@ -265,3 +265,28 @@ No update may be claimed until it exists in repository source or durable Quirt s
 - **Verification:** strict typecheck, build, executable 146-operation catalog/schema/scope proof, deterministic provider routing and lifecycle tests, full Quirt and repository suites, coverage thresholds, both audit modes, differing-mtime two-build reproduction, non-force push, and independent GitHub readback passed
 - **Supersedes:** none
 - **Notes:** the source correction only strengthens shared provider validation/lifecycle and tmux recovery/negative-path regression tests; runtime source and thresholds were not changed. The evidence-only descendant commit containing this entry is identified by final remote readback. Production was not deployed or mutated. Checkpoint E was not started.
+
+## Entry RG-0009 — Q1 canonical standalone contracts
+
+- **Timestamp:** 2026-07-19T11:30:00Z
+- **Horsey revision:** not changed in this checkpoint
+- **Operator base revision:** not applicable; canonical repository is `StealthEyeLLC/quirt-x`
+- **Quirt revision:** `61069cf5cf968170e7553214f16040b05f3db71c`
+- **Quirt tree:** `f4a8a58ffdaecbabe0b6ca38814acec62e6ab9bf`
+- **User wording:** `You are Cursor Agent taking complete ownership of Quirt-X Q1 for Jamie Currier / StealthEye LLC.`
+- **Intended action:** freeze canonical standalone Quirt-X contracts, validate them in CI, include them in release packages, and merge without deployment or Q2 runtime work
+- **Tool operation:** source contract checkpoint on exact Q0 `main` baseline
+- **Exact terminal input or command:** `npm ci`; `npm run check`; `npm run test:contracts`; `npm test`; `npm run build`; `npm run test:riding-guide`; `npm run test:quirt-release`; `npm run test:quirt-reproducible`; `npm run ci`; `git diff --check`
+- **Result:** `WORKS`
+- **ChatGPT invoked the tool:** yes
+- **Horsey received the request:** no
+- **Quirt received the request:** no; no production Quirt endpoint was contacted
+- **Linux executed it:** yes; source validation only
+- **Exit status:** 0 for final `npm run ci` on head `61069cf5cf968170e7553214f16040b05f3db71c`
+- **Working wording:** direct Q1 contract-freeze instruction for the standalone repository
+- **Denied or blocked wording:** none observed in source scope
+- **Observed limitation:** Q1 freezes contracts and validation only. No operational production behavior was tested. Q2 cryptographic runtime, rescue CLI, repair execution, skill platform, and deployment remain unstarted.
+- **Output or recording reference:** branch `build/quirt-x-q1-canonical-contracts` head `61069cf5cf968170e7553214f16040b05f3db71c` tree `f4a8a58ffdaecbabe0b6ca38814acec62e6ab9bf`; bundle SHA-256 `4046d92a623b3f75d0a23d1da3d97501bc3dd7c5ebc40989c608fb95f10d722b`; schema SHA-256 `bc4e13316b42393a16d70c829ca6d6af61dda8ff3fa2390ef4ea38da7bbe3ece`; CI receipt `.ci-receipts/ci-61069cf5cf968170e7553214f16040b05f3db71c.json` digest `907b83b77487ae7cc12ef79a619143893199dfd5826972d15487c1e72a999fa6`
+- **Verification:** exact-head `npm run ci` passed with 30 gates; unit tests 207 total / 194 passed / 0 failed / 13 skipped; release tests 25 passed; coverage 91.22% lines / 74.77% branches / 86.74% functions; release archive SHA-256 `c303a04c1f6d628b9988a8f942aee53d2daa65f664255ca66c0c0bbc511f9eeb`
+- **Supersedes:** none
+- **Notes:** Q0 baseline on `main` starts at merge commit `c10be8b7504a68fd48422bfd1b4d5b2d3c3cc39b` tree `a7359e1b850dc6d3809572e2d8f69fe9487b30e5`. No deployment occurred. No production mutation occurred. No GitHub Actions were added.
