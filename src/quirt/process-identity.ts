@@ -177,7 +177,10 @@ export function captureProcessIdentitySync(pid: number, reader: ProcReader, capt
     const statText = readFileSync(`/proc/${pid}/stat`, "utf8");
     const statusText = readFileSync(`/proc/${pid}/status`, "utf8");
     const cmdline = (() => { try { return readFileSync(`/proc/${pid}/cmdline`); } catch { return Buffer.alloc(0); } })();
-    const bootId = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    const bootId = (() => {
+      try { return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(); }
+      catch { throw new QuirtError("unsupported_host_capability", "Linux boot identity is unavailable"); }
+    })();
     const executable = (() => { try { return readlinkSync(`/proc/${pid}/exe`); } catch { return null; } })();
     const cwd = (() => { try { return readlinkSync(`/proc/${pid}/cwd`); } catch { return null; } })();
     const pidNamespace = (() => { try { return readlinkSync(`/proc/${pid}/ns/pid`); } catch { return null; } })();
