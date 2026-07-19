@@ -215,9 +215,9 @@ export interface QuirtProtocolContract {
   readonly version: typeof QES2_PROTOCOL_SPEC_VERSION;
   readonly status: typeof QES2_PROTOCOL_SPEC_STATUS;
   readonly versions: typeof QUIRT_ABI_VERSIONS;
-  readonly currentRuntimeSignatureAlgorithm: "hmac-sha256";
+  readonly currentRuntimeSignatureAlgorithm: "ed25519" | "hmac-sha256";
   readonly targetSignatureAlgorithm: "ed25519";
-  readonly q1CryptographicConformance: "target_contract_frozen_runtime_migration_planned_q2";
+  readonly q1CryptographicConformance: "target_contract_frozen_runtime_migration_planned_q2" | "q2_ed25519_runtime_implemented_with_explicit_hmac_compatibility";
   readonly publicRootListener: false;
   readonly activeMcpServer: false;
   readonly activeOAuthServer: false;

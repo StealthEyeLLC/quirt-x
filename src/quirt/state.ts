@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { QuirtError } from "./error.js";
 import { migrateQuirtNativeState, QuirtNativeStateStore } from "./native-state.js";
 import { migrateQuirtPowerState, QUIRT_POWER_SCHEMA_VERSION, QuirtPowerStateStore } from "./power-state.js";
-import type { QuirtRequestReservation } from "./authority.js";
+import type { QuirtAuthorityIdentity, QuirtRequestReservation } from "./authority.js";
 
 export const QUIRT_STATE_SCHEMA_VERSION = QUIRT_POWER_SCHEMA_VERSION;
 
@@ -246,6 +246,7 @@ export class QuirtStateStore implements QuirtRequestReservation {
     this.#migrate();
     migrateQuirtNativeState(this.#db, this.#now);
     migrateQuirtPowerState(this.#db, this.#now);
+    this.#migrateQ2AuthorityNonces();
     this.native = new QuirtNativeStateStore(this.#db, this.#now);
     this.power = new QuirtPowerStateStore(this.#db, this.#now);
   }
@@ -338,6 +339,31 @@ export class QuirtStateStore implements QuirtRequestReservation {
       try { this.#db.exec("ALTER TABLE quirt_jobs ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0 CHECK(timed_out IN (0,1))"); }
       catch (cause) { if (!(cause instanceof Error && cause.message.includes("duplicate column"))) throw cause; }
       this.#db.prepare("INSERT INTO quirt_schema_migrations(version,applied_at) VALUES(4,?)").run(timestamp(this.#now));
+    });
+  }
+
+  #migrateQ2AuthorityNonces(): void {
+    const current = Number((this.#db.prepare("SELECT COALESCE(MAX(version),0) AS version FROM quirt_schema_migrations").get() as { version: number }).version);
+    if (current >= 19) return;
+    if (current !== 18) throw new QuirtError("configuration_error", "Quirt authority nonce migration order is invalid");
+    this.#transaction(() => {
+      this.#db.exec(`CREATE TABLE IF NOT EXISTS quirt_authority_nonces(
+        nonce TEXT PRIMARY KEY,
+        gateway_id TEXT NOT NULL,
+        algorithm TEXT NOT NULL CHECK(algorithm IN ('ed25519','hmac-sha256')),
+        key_id TEXT,
+        request_id TEXT NOT NULL,
+        request_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS quirt_authority_nonces_expiry ON quirt_authority_nonces(expires_at);
+      CREATE INDEX IF NOT EXISTS quirt_authority_nonces_request ON quirt_authority_nonces(request_id);`);
+      this.#db.exec(`INSERT OR IGNORE INTO quirt_authority_nonces(nonce,gateway_id,algorithm,key_id,request_id,request_hash,created_at,expires_at)
+        SELECT n.nonce, 'legacy-gateway', 'hmac-sha256', NULL, n.request_id, r.request_hash, n.created_at, n.expires_at
+        FROM quirt_request_nonces n
+        JOIN quirt_request_records r ON r.request_id = n.request_id`);
+      this.#db.prepare("INSERT INTO quirt_schema_migrations(version,applied_at) VALUES(19,?)").run(timestamp(this.#now));
     });
   }
 
@@ -551,22 +577,49 @@ export class QuirtStateStore implements QuirtRequestReservation {
     return this.getJob(jobId);
   }
 
-  reserveRequest(requestId: string, operation: string, requestHash: string, nonce: string, expiresAt: string): "new" | "replayed" {
+  reserveRequest(requestId: string, operation: string, requestHash: string, authorityIdentity: QuirtAuthorityIdentity, expiresAt: string): "new" | "replayed" {
     return this.#transaction(() => {
       const prior = this.#db.prepare("SELECT operation,request_hash,nonce FROM quirt_request_records WHERE request_id=?").get(requestId) as { operation: string; request_hash: string; nonce: string } | undefined;
       if (prior !== undefined) {
         if (prior.operation !== operation || prior.request_hash !== requestHash) throw new QuirtError("idempotency_conflict", "Quirt request ID was reused for different work");
-        const nonceOwner = this.#db.prepare("SELECT request_id FROM quirt_request_nonces WHERE nonce=?").get(nonce) as { request_id: string } | undefined;
-        if (nonceOwner !== undefined && nonceOwner.request_id !== requestId) throw new QuirtError("duplicate_request", "Quirt request nonce was replayed");
-        this.#db.prepare("INSERT OR IGNORE INTO quirt_request_nonces(nonce,request_id,created_at,expires_at) VALUES(?,?,?,?)").run(nonce, requestId, timestamp(this.#now), expiresAt);
+        this.#assertAuthorityNonceCompatible(authorityIdentity, requestId, requestHash);
+        this.#insertAuthorityNonce(authorityIdentity, requestId, requestHash, expiresAt, true);
         return "replayed";
       }
-      const nonceOwner = this.#db.prepare("SELECT request_id FROM quirt_request_nonces WHERE nonce=?").get(nonce) as { request_id: string } | undefined;
-      if (nonceOwner !== undefined) throw new QuirtError("duplicate_request", "Quirt request nonce was replayed");
-      this.#db.prepare("INSERT INTO quirt_request_records(request_id,operation,request_hash,nonce,state,created_at,expires_at) VALUES(?,?,?,?, 'reserved',?,?)").run(requestId, operation, requestHash, nonce, timestamp(this.#now), expiresAt);
-      this.#db.prepare("INSERT INTO quirt_request_nonces(nonce,request_id,created_at,expires_at) VALUES(?,?,?,?)").run(nonce, requestId, timestamp(this.#now), expiresAt);
+      this.#assertAuthorityNonceCompatible(authorityIdentity, requestId, requestHash);
+      this.#db.prepare("INSERT INTO quirt_request_records(request_id,operation,request_hash,nonce,state,created_at,expires_at) VALUES(?,?,?,?, 'reserved',?,?)").run(requestId, operation, requestHash, authorityIdentity.nonce, timestamp(this.#now), expiresAt);
+      this.#insertAuthorityNonce(authorityIdentity, requestId, requestHash, expiresAt, false);
       return "new";
     });
+  }
+
+  #assertAuthorityNonceCompatible(authorityIdentity: QuirtAuthorityIdentity, requestId: string, requestHash: string): void {
+    const row = this.#db.prepare("SELECT gateway_id,algorithm,key_id,request_id,request_hash FROM quirt_authority_nonces WHERE nonce=?").get(authorityIdentity.nonce) as {
+      gateway_id: string; algorithm: string; key_id: string | null; request_id: string; request_hash: string;
+    } | undefined;
+    if (row === undefined) return;
+    if (row.request_id !== requestId) throw new QuirtError("duplicate_request", "Quirt request nonce was replayed");
+    if (row.request_hash !== requestHash) throw new QuirtError("replay_conflict", "Quirt request nonce was replayed for different work");
+    if (row.gateway_id !== authorityIdentity.gatewayId) throw new QuirtError("replay_conflict", "Quirt request nonce was replayed for a different gateway");
+    if (row.algorithm !== authorityIdentity.algorithm) throw new QuirtError("replay_conflict", "Quirt request nonce was replayed for a different algorithm");
+    const expectedKeyId = authorityIdentity.keyId ?? null;
+    if ((row.key_id ?? null) !== expectedKeyId) throw new QuirtError("replay_conflict", "Quirt request nonce was replayed for a different key");
+  }
+
+  #insertAuthorityNonce(authorityIdentity: QuirtAuthorityIdentity, requestId: string, requestHash: string, expiresAt: string, ignoreDuplicate: boolean): void {
+    const statement = ignoreDuplicate
+      ? "INSERT OR IGNORE INTO quirt_authority_nonces(nonce,gateway_id,algorithm,key_id,request_id,request_hash,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)"
+      : "INSERT INTO quirt_authority_nonces(nonce,gateway_id,algorithm,key_id,request_id,request_hash,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)";
+    this.#db.prepare(statement).run(
+      authorityIdentity.nonce,
+      authorityIdentity.gatewayId,
+      authorityIdentity.algorithm,
+      authorityIdentity.keyId,
+      requestId,
+      requestHash,
+      timestamp(this.#now),
+      expiresAt
+    );
   }
 
   completeRequest(requestId: string, response: Record<string, unknown>): void {
@@ -586,7 +639,13 @@ export class QuirtStateStore implements QuirtRequestReservation {
   }
 
   purgeExpiredRequests(): number {
-    return Number(this.#db.prepare("DELETE FROM quirt_request_records WHERE expires_at<?").run(timestamp(this.#now)).changes);
+    const at = timestamp(this.#now);
+    return this.#transaction(() => {
+      const requests = Number(this.#db.prepare("DELETE FROM quirt_request_records WHERE expires_at<?").run(at).changes);
+      Number(this.#db.prepare("DELETE FROM quirt_authority_nonces WHERE expires_at<?").run(at).changes);
+      Number(this.#db.prepare("DELETE FROM quirt_request_nonces WHERE expires_at<?").run(at).changes);
+      return requests;
+    });
   }
 
   recordRecovery(ownerKind: QuirtStreamOwner, ownerId: string, action: string, outcome: string, details: Record<string, unknown> = {}): string {

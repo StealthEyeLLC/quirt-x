@@ -187,7 +187,7 @@
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/semanticVersion" }
         },
-        "currentRuntimeSignatureAlgorithm": { "type": "string", "const": "hmac-sha256" },
+        "currentRuntimeSignatureAlgorithm": { "type": "string", "enum": ["ed25519", "hmac-sha256"] },
         "targetSignatureAlgorithm": { "type": "string", "const": "ed25519" },
         "q1CryptographicConformance": { "type": "string", "maxLength": 128 },
         "publicRootListener": { "type": "boolean", "const": false },

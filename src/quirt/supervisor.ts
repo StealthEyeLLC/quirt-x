@@ -4,6 +4,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
 import type { Duplex } from "node:stream";
 import type { QuirtSupervisorAuthority } from "./authority.js";
+import { negotiateConnection, supervisorSupportedCapabilities, type QuirtNegotiatedConnectionContext } from "./authority-negotiation.js";
 import type { QuirtConfig } from "./config.js";
 import { QuirtFramedChannel } from "./connection.js";
 import { QuirtError, quirtErrorCode, safeQuirtError } from "./error.js";
@@ -18,6 +19,7 @@ interface SupervisorConnection {
   channel: QuirtFramedChannel;
   handshaken: boolean;
   connectionId: string | null;
+  negotiated: QuirtNegotiatedConnectionContext | null;
   peer: QuirtPeerCredentials;
   activeRequests: Map<string, AbortController>;
 }
@@ -105,7 +107,7 @@ export class QuirtSupervisorServer {
 
   #accept(stream: Duplex, peer: QuirtPeerCredentials): void {
     const channel = new QuirtFramedChannel(stream, { maxFrameBytes: this.config.maxFrameBytes, maxBufferedBytes: this.config.maxBufferedBytes, maxWriteQueueBytes: this.config.maxWriteQueueBytes });
-    const connection: SupervisorConnection = { channel, handshaken: false, connectionId: null, peer, activeRequests: new Map() };
+    const connection: SupervisorConnection = { channel, handshaken: false, connectionId: null, negotiated: null, peer, activeRequests: new Map() };
     this.#connections.add(connection);
     channel.onFrame(frame => { void this.#frame(connection, frame); });
     channel.onDecodeError(cause => {
@@ -145,17 +147,43 @@ export class QuirtSupervisorServer {
     if (hello.gatewayId !== this.config.gatewayId || hello.protocolVersion !== QUIRT_PROTOCOL_VERSION || hello.connectionId.length > 128 || hello.challenge.length > 256) throw new QuirtError("authentication_failed", "Quirt Gateway handshake is invalid");
     const age = Math.abs(Date.now() - Date.parse(hello.timestamp));
     if (!Number.isFinite(age) || age > this.config.requestMaxAgeMs) throw new QuirtError("stale_request", "Quirt handshake timestamp is stale");
+    const negotiated = negotiateConnection({
+      gatewayOffers: hello.capabilities,
+      supervisorSupports: [...supervisorSupportedCapabilities(this.config.supportedAuthorityAlgorithms)],
+      gatewayPreferredAlgorithms: this.config.supportedAuthorityAlgorithms.includes("ed25519") ? ["ed25519", "hmac-sha256"] : ["hmac-sha256"],
+      supervisorSupportedAlgorithms: this.config.supportedAuthorityAlgorithms,
+      legacyHmacEnabled: this.config.legacyHmacEnabled
+    });
+    const timestamp = new Date().toISOString();
+    const negotiatedContext: QuirtNegotiatedConnectionContext = Object.freeze({
+      connectionId: hello.connectionId,
+      authorityAlgorithm: negotiated.authorityAlgorithm,
+      compression: negotiated.compression,
+      capabilities: negotiated.capabilities,
+      supervisorKeyId: negotiated.authorityAlgorithm === "ed25519" ? this.authority.supervisorKeyId : null
+    });
+    const challengeResponse = this.authority.signHandshakeResponse({
+      connectionId: hello.connectionId,
+      gatewayId: hello.gatewayId,
+      challenge: hello.challenge,
+      negotiated: negotiatedContext,
+      timestamp
+    });
     connection.handshaken = true;
     connection.connectionId = hello.connectionId;
+    connection.negotiated = negotiatedContext;
     await connection.channel.send({
       envelope: {
         kind: "welcome",
         protocolVersion: QUIRT_PROTOCOL_VERSION,
         connectionId: hello.connectionId,
         supervisorId: this.config.supervisorId,
-        challengeResponse: this.authority.challengeResponse(hello.connectionId, hello.challenge),
-        capabilities: ["multiplexing", "events", "raw-binary", "reconnect", "replay-offsets"],
-        timestamp: new Date().toISOString(),
+        challengeResponse,
+        capabilities: negotiated.capabilities,
+        selectedAuthorityAlgorithm: negotiated.authorityAlgorithm,
+        selectedCompression: negotiated.compression,
+        ...(negotiated.authorityAlgorithm === "ed25519" ? { supervisorKeyId: this.authority.supervisorKeyId ?? undefined } : {}),
+        timestamp,
         binaryLength: 0
       },
       binary: Buffer.alloc(0)
@@ -168,7 +196,7 @@ export class QuirtSupervisorServer {
     connection.activeRequests.set(request.requestId, controller);
     let reserved = false;
     try {
-      const verified = this.authority.verify(request, binary);
+      const verified = this.authority.verify(request, binary, connection.negotiated ?? (() => { throw new QuirtError("authentication_failed", "Quirt connection negotiation is missing"); })());
       reserved = !verified.replayed;
       if (verified.replayed) {
         const prior = this.state.requestResult(request.requestId);

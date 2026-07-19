@@ -330,9 +330,9 @@ function buildProtocolContract(): QuirtProtocolContract {
     version: QES2_PROTOCOL_SPEC_VERSION,
     status: QES2_PROTOCOL_SPEC_STATUS,
     versions: QUIRT_ABI_VERSIONS,
-    currentRuntimeSignatureAlgorithm: "hmac-sha256",
+    currentRuntimeSignatureAlgorithm: "ed25519",
     targetSignatureAlgorithm: "ed25519",
-    q1CryptographicConformance: "target_contract_frozen_runtime_migration_planned_q2",
+    q1CryptographicConformance: "q2_ed25519_runtime_implemented_with_explicit_hmac_compatibility",
     publicRootListener: false,
     activeMcpServer: false,
     activeOAuthServer: false
@@ -361,9 +361,10 @@ function buildPathContract(): QuirtPathContract {
 function buildPhaseRegistry(): QuirtProgramStatusRegistry {
   const phases: QuirtPhaseStatus[] = [
     { phase: "Q0", status: "validated", notes: "Standalone source-complete release foundation merged to main" },
-    { phase: "Q1", status: "validated", notes: "Canonical standalone contracts frozen at merge candidate" }
+    { phase: "Q1", status: "validated", notes: "Canonical standalone contracts frozen at merge candidate" },
+    { phase: "Q2", status: "source complete", notes: "Ed25519 runtime, key rotation, replay/reconnect hardening, compression negotiation, public Actions CI" }
   ];
-  for (let index = 2; index <= 26; index += 1) {
+  for (let index = 3; index <= 26; index += 1) {
     phases.push({ phase: `Q${index}`, status: "planned", notes: "Not started in Q1" });
   }
   return Object.freeze({
@@ -378,9 +379,11 @@ function buildConformanceMatrix(): QuirtConformanceEntry[] {
     { area: "private_socket", targetContract: QUIRT_SOCKET_PATH, currentSourceBehavior: "config and systemd socket unit use /run/horsey/quirt.sock", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "deployment-contract.test.ts and config.ts", knownGap: "production socket activation not exercised in CI", acceptableInQ1: true },
     { area: "uid0_daemon_intent", targetContract: "daemon UID 0", currentSourceBehavior: "systemd service User=root", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "ops/systemd/stealtheye-quirt.service", knownGap: "not deployed", acceptableInQ1: true },
     { area: "authority_identity", targetContract: "stealtheye-owner unrestricted-owner exact issuer", currentSourceBehavior: "exact principal verification in authority.ts", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "authority.test.ts", knownGap: "production issuer configured at deploy time", acceptableInQ1: true },
-    { area: "current_hmac_signatures", targetContract: "HMAC-SHA256 runtime signatures", currentSourceBehavior: "authority.ts uses hmac-sha256", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "protocol.ts algorithm field", knownGap: "not Ed25519", acceptableInQ1: true },
-    { area: "target_ed25519_signatures", targetContract: "Ed25519 target signatures", currentSourceBehavior: "not implemented", implementationStatus: "planned", firstPlannedPhase: "Q2", evidence: "QES-2 protocol contract", knownGap: "runtime migration required", acceptableInQ1: true },
-    { area: "replay_protection", targetContract: "nonce and request-hash replay store", currentSourceBehavior: "reservation store in authority path", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "authority.ts reserveRequest", knownGap: "Q2 replay-store redesign planned", acceptableInQ1: true },
+    { area: "current_hmac_signatures", targetContract: "HMAC-SHA256 runtime signatures", currentSourceBehavior: "explicit negotiated transitional compatibility only", implementationStatus: "source complete", firstPlannedPhase: "Q2", evidence: "authority.ts legacyHmacEnabled path", knownGap: "not default for Q2 peers", acceptableInQ1: true },
+    { area: "target_ed25519_signatures", targetContract: "Ed25519 target signatures", currentSourceBehavior: "Ed25519 request signing and verification in production path", implementationStatus: "source complete", firstPlannedPhase: "Q2", evidence: "authority.ts and authority-keyring.ts", knownGap: "not production deployed", acceptableInQ1: true },
+    { area: "replay_protection", targetContract: "nonce and request-hash replay store", currentSourceBehavior: "independent authority nonce persistence with algorithm and key binding", implementationStatus: "source complete", firstPlannedPhase: "Q2", evidence: "state.ts quirt_authority_nonces migration", knownGap: "not production deployed", acceptableInQ1: true },
+    { area: "reconnect_replay", targetContract: "reconnect request replay without duplicate execution", currentSourceBehavior: "bounded reconnect state machine preserves signed envelope", implementationStatus: "source complete", firstPlannedPhase: "Q2", evidence: "client.ts reconnect loop", knownGap: "not production deployed", acceptableInQ1: true },
+    { area: "compression_negotiation", targetContract: "explicit compression negotiation", currentSourceBehavior: "compression.none negotiated and signed; wire compression unavailable", implementationStatus: "source complete", firstPlannedPhase: "Q2", evidence: "authority-negotiation.ts", knownGap: "no compressed frames", acceptableInQ1: true },
     { area: "root_execution", targetContract: "unrestricted authenticated root execution", currentSourceBehavior: "quirt.exec and sessions without allowlists", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "operations.ts and authority contract", knownGap: "not production deployed", acceptableInQ1: true },
     { area: "providers", targetContract: "provider lifecycle and fallback without disabling root authority", currentSourceBehavior: "13 source providers with provider_unavailable path", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "power-catalog.ts", knownGap: "not all lifecycle verbs implemented", acceptableInQ1: true },
     { area: "release_packaging", targetContract: "immutable release layout with contract bundle inclusion", currentSourceBehavior: "release builder packages dist and evidence", implementationStatus: "source complete", firstPlannedPhase: "Q1", evidence: "build-quirt-release.sh", knownGap: "contract bundle inclusion added in Q1", acceptableInQ1: true },

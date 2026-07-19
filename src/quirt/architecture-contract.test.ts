@@ -95,12 +95,12 @@ describe("Quirt architecture contract invariants", () => {
     assert.ok(rescueDeps.includes("oauth"));
   });
 
-  it("documents HMAC runtime and Ed25519 target without claiming Q2 crypto is implemented", () => {
+  it("documents Ed25519 runtime and transitional HMAC compatibility without claiming production validation", () => {
     const bundle = buildQuirtContractBundle();
-    assert.equal(bundle.protocol.currentRuntimeSignatureAlgorithm, "hmac-sha256");
+    assert.equal(bundle.protocol.currentRuntimeSignatureAlgorithm, "ed25519");
     assert.equal(bundle.protocol.targetSignatureAlgorithm, "ed25519");
     const ed25519 = bundle.conformance.find((item) => item.area === "target_ed25519_signatures");
-    assert.equal(ed25519?.implementationStatus, "planned");
+    assert.equal(ed25519?.implementationStatus, "source complete");
     assert.equal(ed25519?.firstPlannedPhase, "Q2");
   });
 

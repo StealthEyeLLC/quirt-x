@@ -70,6 +70,6 @@ describe("Quirt contract catalog", () => {
     assert.equal(bundle.capabilities.length, 25);
     assert.equal(bundle.statusTaxonomy.phases.find((item) => item.phase === "Q0")?.status, "validated");
     assert.equal(bundle.statusTaxonomy.phases.find((item) => item.phase === "Q1")?.status, "validated");
-    assert.equal(bundle.statusTaxonomy.phases.find((item) => item.phase === "Q2")?.status, "planned");
+    assert.equal(bundle.statusTaxonomy.phases.find((item) => item.phase === "Q2")?.status, "source complete");
   });
 });

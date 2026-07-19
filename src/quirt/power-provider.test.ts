@@ -207,11 +207,11 @@ test("complete Checkpoint D catalog registers all and only the 86 frozen operati
   assert.deepEqual([...QUIRT_POWER_FOUNDATION_OPERATIONS].sort(), [...QUIRT_POWER_OPERATIONS].sort());
 });
 
-test("schema 18 initializes definitions, durable instances, events, replay, rollback, and reopen", async () => {
+test("schema 19 initializes definitions, durable instances, events, replay, rollback, and reopen", async () => {
   const value = await fixture();
   const { state, config } = value;
   try {
-    assert.equal(state.schemaVersion(), 18);
+    assert.equal(state.schemaVersion(), 19);
     assert.equal(state.power.definitions().length, 13);
     const instance = state.power.putInstance({ providerId: "preview.process", providerVersion: "1", ownerPrincipalFingerprint: OWNER, targetHost: TARGET, state: "creating", credentialReferences: ["credential://preview/auth"], configuration: { bindAddress: "127.0.0.1" } });
     state.power.appendEvent(instance.instanceId, "lifecycle.creating", { progress: 1 });
@@ -234,7 +234,7 @@ test("schema 18 initializes definitions, durable instances, events, replay, roll
     state.power.foreignKeyCheck();
     state.close();
     const reopened = new QuirtStateStore(config.databasePath);
-    assert.equal(reopened.schemaVersion(), 18);
+    assert.equal(reopened.schemaVersion(), 19);
     assert.equal(reopened.power.getInstance(instance.instanceId, OWNER, TARGET).credentialReferences[0], "credential://preview/auth");
     reopened.close();
     await rm(value.root, { recursive: true, force: true });

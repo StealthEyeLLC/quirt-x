@@ -166,7 +166,9 @@ export function validateQuirtContractSemantics(
   if (bundle.protocol.publicRootListener !== false) issues.push(issue("protocol.publicRootListener", "Public root listener must be false"));
   if (bundle.protocol.activeMcpServer !== false) issues.push(issue("protocol.activeMcpServer", "Active MCP server must be false"));
   if (bundle.protocol.activeOAuthServer !== false) issues.push(issue("protocol.activeOAuthServer", "Active OAuth server must be false"));
-  if (bundle.protocol.currentRuntimeSignatureAlgorithm !== "hmac-sha256") issues.push(issue("protocol.currentRuntimeSignatureAlgorithm", "Current runtime must remain HMAC-SHA256"));
+  if (bundle.protocol.currentRuntimeSignatureAlgorithm !== "ed25519" && bundle.protocol.currentRuntimeSignatureAlgorithm !== "hmac-sha256") {
+    issues.push(issue("protocol.currentRuntimeSignatureAlgorithm", "Current runtime signature algorithm must be declared"));
+  }
   if (bundle.protocol.targetSignatureAlgorithm !== "ed25519") issues.push(issue("protocol.targetSignatureAlgorithm", "Target signature algorithm must be Ed25519"));
   if (bundle.authority.authorityClass !== QUIRT_OWNER_AUTHORITY_CLASS) issues.push(issue("authority.authorityClass", "Authority class must be unrestricted-owner"));
   if (!bundle.authority.prohibitedAuthorization.includes("command_allowlists")) issues.push(issue("authority.prohibitedAuthorization", "Command allowlists must be prohibited"));
@@ -184,20 +186,22 @@ export function validateQuirtContractSemantics(
   if (!("immutabilityRules" in bundle.receipt)) issues.push(issue("receipt", "Receipt contract must forbid secrets and false termination"));
 
   for (const phase of bundle.statusTaxonomy.phases) {
-    if (phase.phase.match(/^Q([2-9]|1\d|2[0-6])$/u) && phase.status !== "planned") {
-      issues.push(issue(`statusTaxonomy.phases.${phase.phase}`, "Future phases must remain planned in Q1"));
+    if (phase.phase.match(/^Q([3-9]|1\d|2[0-6])$/u) && phase.status !== "planned") {
+      issues.push(issue(`statusTaxonomy.phases.${phase.phase}`, "Future phases beyond Q2 must remain planned"));
     }
   }
   const q0 = bundle.statusTaxonomy.phases.find((item) => item.phase === "Q0");
   const q1 = bundle.statusTaxonomy.phases.find((item) => item.phase === "Q1");
+  const q2 = bundle.statusTaxonomy.phases.find((item) => item.phase === "Q2");
   if (q0?.status !== "validated") issues.push(issue("statusTaxonomy.phases.Q0", "Q0 must be validated"));
   if (q1?.status !== "validated") issues.push(issue("statusTaxonomy.phases.Q1", "Q1 must be validated"));
+  if (q2 !== undefined && q2.status === "planned") issues.push(issue("statusTaxonomy.phases.Q2", "Q2 must not remain planned after Q2 runtime implementation"));
 
   for (const entry of bundle.conformance) {
     if (entry.area === "target_ed25519_signatures" && entry.implementationStatus === "validated") {
-      issues.push(issue(`conformance.${entry.area}`, "Ed25519 must not be presented as currently implemented"));
+      issues.push(issue(`conformance.${entry.area}`, "Ed25519 must not be presented as production-validated in Q2"));
     }
-    if (entry.area === "current_hmac_signatures" && entry.currentSourceBehavior.includes("ed25519")) {
+    if (entry.area === "current_hmac_signatures" && entry.currentSourceBehavior.includes("ed25519") && !entry.currentSourceBehavior.includes("HMAC")) {
       issues.push(issue(`conformance.${entry.area}`, "HMAC must not be misrepresented as Ed25519"));
     }
   }

@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createConnection } from "node:net";
 import type { Duplex } from "node:stream";
-import type { QuirtGatewaySigner, QuirtUnsignedRequest } from "./authority.js";
+import type { QuirtGatewaySigner } from "./authority.js";
+import { assertWelcomeMatchesNegotiation, gatewayOfferedCapabilities, negotiateConnection, type QuirtNegotiatedConnectionContext } from "./authority-negotiation.js";
+import type { QuirtVerificationKeyRing } from "./authority-keyring.js";
 import type { QuirtConfig } from "./config.js";
 import { QuirtFramedChannel } from "./connection.js";
 import { QuirtError, quirtErrorCode } from "./error.js";
@@ -30,7 +32,7 @@ export class UnixQuirtSocketFactory implements QuirtSocketFactory {
 }
 
 export interface QuirtClientResponse { payload: Record<string, unknown>; binary: Buffer; replayed: boolean; }
-export interface QuirtClientEvent { envelope: QuirtEventEnvelope; binary: Buffer; }
+export interface QuirtClientEvent { envelope: QuirtEventEnvelope; binary: Buffer; reconnectGap?: boolean; }
 
 interface Pending {
   resolve: (response: QuirtClientResponse) => void;
@@ -39,19 +41,39 @@ interface Pending {
   removeAbort?: () => void;
 }
 
+interface InFlightRequest {
+  envelope: QuirtRequestEnvelope;
+  binary: Buffer;
+  timeoutMs: number;
+  signal?: AbortSignal;
+  startedAt: number;
+  deadlineAt: number;
+}
+
 function aborted(signal: AbortSignal | undefined): boolean { return signal?.aborted === true; }
 
 export class QuirtGatewayClient {
   readonly #events = new EventEmitter();
   readonly #pending = new Map<string, Pending>();
+  readonly #supervisorVerificationKeyRing: QuirtVerificationKeyRing | null;
   #channel: QuirtFramedChannel | null = null;
   #connecting: Promise<QuirtFramedChannel> | null = null;
   #welcome: { resolve: (value: QuirtWelcomeEnvelope) => void; reject: (cause: unknown) => void } | null = null;
+  #negotiated: QuirtNegotiatedConnectionContext | null = null;
+  #connectionGeneration = 0;
+  #lastAcceptedEventSequence: number | null = null;
   #liveness: NodeJS.Timeout | null = null;
   #lastPong = 0;
   #closed = false;
 
-  constructor(private readonly config: QuirtConfig, private readonly signer: QuirtGatewaySigner, private readonly sockets: QuirtSocketFactory = new UnixQuirtSocketFactory(config)) {}
+  constructor(
+    private readonly config: QuirtConfig,
+    private readonly signer: QuirtGatewaySigner,
+    private readonly sockets: QuirtSocketFactory = new UnixQuirtSocketFactory(config),
+    options: { supervisorVerificationKeyRing?: QuirtVerificationKeyRing } = {}
+  ) {
+    this.#supervisorVerificationKeyRing = options.supervisorVerificationKeyRing ?? null;
+  }
 
   onEvent(listener: (event: QuirtClientEvent) => void): () => void {
     this.#events.on("event", listener);
@@ -63,25 +85,37 @@ export class QuirtGatewayClient {
   async request(input: { operation: string; payload?: Record<string, unknown>; binary?: Buffer; principal: QuirtPrincipalEnvelope; requestId?: string; timeoutMs?: number; signal?: AbortSignal }): Promise<QuirtClientResponse> {
     if (this.#closed) throw new QuirtError("supervisor_unavailable", "Quirt Gateway client is closed", true);
     const binary = Buffer.from(input.binary ?? Buffer.alloc(0));
-    const unsigned: QuirtUnsignedRequest = {
+    const timeoutMs = input.timeoutMs ?? this.config.requestTimeoutMs;
+    const startedAt = Date.now();
+    const deadlineAt = startedAt + timeoutMs;
+    const envelope = this.signer.sign({
       protocolVersion: QUIRT_PROTOCOL_VERSION,
       requestId: input.requestId ?? randomUUID(),
       operation: input.operation,
       principal: input.principal,
       targetHost: this.config.targetHost,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(startedAt).toISOString(),
       payload: input.payload ?? {},
       binaryLength: binary.length
-    };
-    const envelope = this.signer.sign(unsigned, binary);
+    }, binary);
+    const inFlight: InFlightRequest = { envelope, binary, timeoutMs, signal: input.signal, startedAt, deadlineAt };
+    let attempt = 0;
     let last: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try { return await this.#send(envelope, binary, input.timeoutMs ?? this.config.requestTimeoutMs, input.signal); }
-      catch (cause) {
+    while (attempt < this.config.maxReconnectAttempts) {
+      attempt += 1;
+      if (aborted(input.signal)) throw new QuirtError("request_canceled", "Quirt request was canceled", false);
+      const remaining = deadlineAt - Date.now();
+      if (remaining < 100) throw new QuirtError("timeout", "Quirt request timed out", true);
+      try {
+        return await this.#send(inFlight, remaining, input.signal);
+      } catch (cause) {
         last = cause;
-        if (!(cause instanceof QuirtError && cause.retryable && cause.code === "supervisor_unavailable") || attempt === 1) throw cause;
-        this.#channel?.close(cause);
-        this.#channel = null;
+        if (!(cause instanceof QuirtError) || !cause.retryable || cause.code === "request_canceled") throw cause;
+        if (cause.code !== "supervisor_unavailable" && cause.code !== "timeout") throw cause;
+        if (attempt >= this.config.maxReconnectAttempts) throw cause;
+        this.#resetTransport(cause);
+        const backoff = Math.min(this.config.reconnectBackoffMaxMs, this.config.reconnectBackoffMinMs * (2 ** (attempt - 1)));
+        await this.#sleep(backoff, input.signal);
       }
     }
     throw last;
@@ -95,11 +129,15 @@ export class QuirtGatewayClient {
     this.#channel = null;
   }
 
-  async #send(envelope: QuirtRequestEnvelope, binary: Buffer, timeoutMs: number, signal?: AbortSignal): Promise<QuirtClientResponse> {
+  async #send(inFlight: InFlightRequest, timeoutMs: number, signal?: AbortSignal): Promise<QuirtClientResponse> {
+    const envelope = inFlight.envelope;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 24 * 60 * 60 * 1000) throw new QuirtError("invalid_request", "Quirt client timeout is invalid");
     if (aborted(signal)) throw new QuirtError("request_canceled", "Quirt request was canceled", false);
     if (this.#pending.has(envelope.requestId)) throw new QuirtError("duplicate_request", "Quirt request ID is already in flight", true);
     const channel = await this.#connect();
+    if (this.#negotiated !== null && envelope.authority.algorithm !== this.#negotiated.authorityAlgorithm) {
+      throw new QuirtError("authentication_failed", "Quirt signed request does not match negotiated authority algorithm", false);
+    }
     if (aborted(signal)) throw new QuirtError("request_canceled", "Quirt request was canceled", false);
     return await new Promise<QuirtClientResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -119,7 +157,7 @@ export class QuirtGatewayClient {
       }
       this.#pending.set(envelope.requestId, pending);
       if (aborted(signal)) { const active = this.#pending.get(envelope.requestId); if (active !== undefined) { clearTimeout(active.timer); active.removeAbort?.(); this.#pending.delete(envelope.requestId); active.reject(new QuirtError("request_canceled", "Quirt request was canceled", false)); } return; }
-      void channel.send({ envelope, binary }).catch(cause => {
+      void channel.send({ envelope, binary: inFlight.binary }).catch(cause => {
         const pending = this.#pending.get(envelope.requestId);
         if (pending === undefined) return;
         clearTimeout(pending.timer); pending.removeAbort?.();
@@ -151,7 +189,19 @@ export class QuirtGatewayClient {
     const challenge = quirtHandshakeChallenge();
     const welcome = new Promise<QuirtWelcomeEnvelope>((resolve, reject) => { this.#welcome = { resolve, reject }; });
     void welcome.catch(() => undefined);
-    await channel.send({ envelope: { kind: "hello", protocolVersion: QUIRT_PROTOCOL_VERSION, connectionId, gatewayId: this.config.gatewayId, challenge, capabilities: ["multiplexing", "events", "raw-binary", "reconnect"], timestamp: new Date().toISOString(), binaryLength: 0 }, binary: Buffer.alloc(0) });
+    await channel.send({
+      envelope: {
+        kind: "hello",
+        protocolVersion: QUIRT_PROTOCOL_VERSION,
+        connectionId,
+        gatewayId: this.config.gatewayId,
+        challenge,
+        capabilities: [...gatewayOfferedCapabilities(this.config.supportedAuthorityAlgorithms)],
+        timestamp: new Date().toISOString(),
+        binaryLength: 0
+      },
+      binary: Buffer.alloc(0)
+    });
     const timer = setTimeout(() => this.#welcome?.reject(new QuirtError("timeout", "Quirt handshake timed out", true)), this.config.connectionTimeoutMs);
     timer.unref();
     let response: QuirtWelcomeEnvelope;
@@ -159,7 +209,39 @@ export class QuirtGatewayClient {
     catch (cause) { channel.close(cause); throw cause; }
     finally { clearTimeout(timer); this.#welcome = null; }
     if (response.connectionId !== connectionId || response.supervisorId !== this.config.supervisorId) { channel.close(); throw new QuirtError("authentication_failed", "Quirt supervisor handshake identity is invalid"); }
-    this.signer.verifyChallengeResponse(connectionId, challenge, response.challengeResponse);
+    const negotiated: QuirtNegotiatedConnectionContext = Object.freeze({
+      connectionId,
+      authorityAlgorithm: response.selectedAuthorityAlgorithm,
+      compression: response.selectedCompression,
+      capabilities: [...response.capabilities],
+      supervisorKeyId: response.selectedAuthorityAlgorithm === "ed25519" ? response.supervisorKeyId ?? null : null
+    });
+    const expected = negotiateConnection({
+      gatewayOffers: [...gatewayOfferedCapabilities(this.config.supportedAuthorityAlgorithms)],
+      supervisorSupports: [...response.capabilities],
+      gatewayPreferredAlgorithms: this.config.supportedAuthorityAlgorithms.includes("ed25519") ? ["ed25519", "hmac-sha256"] : ["hmac-sha256"],
+      supervisorSupportedAlgorithms: this.config.supportedAuthorityAlgorithms,
+      legacyHmacEnabled: this.config.legacyHmacEnabled
+    });
+    assertWelcomeMatchesNegotiation({
+      welcomeCapabilities: response.capabilities,
+      selectedAuthorityAlgorithm: response.selectedAuthorityAlgorithm,
+      selectedCompression: response.selectedCompression,
+      negotiated: expected
+    });
+    this.signer.verifySupervisorHandshake({
+      connectionId,
+      gatewayId: this.config.gatewayId,
+      supervisorId: response.supervisorId,
+      challenge,
+      challengeResponse: response.challengeResponse,
+      negotiated,
+      supervisorVerificationKeyRing: this.#supervisorVerificationKeyRing ?? undefined,
+      timestamp: response.timestamp,
+      now: new Date()
+    });
+    this.#negotiated = negotiated;
+    this.#connectionGeneration += 1;
     this.#channel = channel;
     this.#lastPong = Date.now();
     this.#startLiveness();
@@ -175,7 +257,13 @@ export class QuirtGatewayClient {
       if (envelope.requestId === null) this.#welcome?.reject(error); else this.#reject(envelope.requestId, error);
       return;
     }
-    if (envelope.kind === "event") { this.#events.emit("event", { envelope, binary: frame.binary } satisfies QuirtClientEvent); return; }
+    if (envelope.kind === "event") {
+      let reconnectGap = false;
+      if (this.#lastAcceptedEventSequence !== null && envelope.sequence !== this.#lastAcceptedEventSequence + 1) reconnectGap = true;
+      this.#lastAcceptedEventSequence = envelope.sequence;
+      this.#events.emit("event", { envelope, binary: frame.binary, reconnectGap } satisfies QuirtClientEvent);
+      return;
+    }
     if (envelope.kind === "ping") { void channel.send({ envelope: { kind: "pong", protocolVersion: QUIRT_PROTOCOL_VERSION, nonce: envelope.nonce, timestamp: new Date().toISOString(), binaryLength: 0 }, binary: Buffer.alloc(0) }); return; }
     if (envelope.kind === "pong") this.#lastPong = Date.now();
   }
@@ -197,10 +285,29 @@ export class QuirtGatewayClient {
   }
 
   #disconnected(channel: QuirtFramedChannel, cause: unknown): void {
-    if (this.#channel === channel) this.#channel = null;
+    if (this.#channel === channel) {
+      this.#channel = null;
+      this.#negotiated = null;
+    }
     const welcome = this.#welcome; this.#welcome = null;
     welcome?.reject(new QuirtError("supervisor_unavailable", "Quirt supervisor disconnected during handshake", true));
     for (const requestId of [...this.#pending.keys()]) this.#reject(requestId, cause instanceof QuirtError ? cause : new QuirtError("supervisor_unavailable", "Quirt supervisor disconnected", true));
+  }
+
+  #resetTransport(cause: unknown): void {
+    this.#channel?.close(cause);
+    this.#channel = null;
+    this.#negotiated = null;
+  }
+
+  async #sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    if (ms <= 0) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+      const onAbort = () => { cleanup(); reject(new QuirtError("request_canceled", "Quirt request was canceled", false)); };
+      const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); };
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   #startLiveness(): void {

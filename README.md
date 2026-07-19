@@ -10,7 +10,8 @@ This repository is the canonical standalone program repository `StealthEyeLLC/qu
 | --- | --- |
 | Q0 | `validated` — standalone source-complete release foundation merged to `main` |
 | Q1 | `validated` — canonical standalone contracts frozen on `build/quirt-x-q1-canonical-contracts` |
-| Q2–Q26 | `planned` |
+| Q2 | `source complete` — Ed25519 runtime, key rotation, replay/reconnect hardening, compression negotiation, public Actions CI |
+| Q3–Q26 | `planned` |
 
 Q1 is a source-and-contract checkpoint. It freezes contracts and validation; it does not deploy Quirt or implement Q2 runtime cryptography.
 
@@ -21,8 +22,7 @@ Q1 is a source-and-contract checkpoint. It freezes contracts and validation; it 
 - Private socket: `/run/horsey/quirt.sock`
 - Socket owner/group/mode: `root` / `horsey` / `0660`
 - Public root listener: none
-- Current runtime signatures: HMAC-SHA256
-- Q2 target signatures: Ed25519
+- Current runtime signatures: Ed25519 (default) with explicit negotiated HMAC-SHA256 compatibility
 
 ## Requirements
 
@@ -65,5 +65,5 @@ Ed25519 signing runtime, key rotation, replay-store redesign, reconnect redesign
 
 - Quirt is not deployed from this checkpoint.
 - No public root listener exists in active source.
-- No GitHub Actions workflow is required.
+- Public GitHub Actions CI runs `npm run ci` when the repository is public; workflows skip when the repository is private.
 - No model API is required.
