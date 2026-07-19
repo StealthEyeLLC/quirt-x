@@ -12,5 +12,9 @@
     "finalDestinationTree",
     "remoteReadbackStatus"
   ],
-  "reason": "The extraction manifest is an immutable snapshot of the last content-bearing extraction commit. Exact-copy and transformation totals are recomputed from all records, and current audit corrections are authenticated by Git history plus exact-head CI rather than by self-referential manifest fields."
+  "excludedRecordDescriptionExceptions": {
+    "ops/systemd/stealtheye-fix-operator.service": "operator-only systemd unit; standalone ships quirt units only",
+    "src/server.ts": "public MCP HTTP server; requires operator-only dependencies"
+  },
+  "reason": "The extraction manifest is an immutable snapshot of the last content-bearing extraction commit. Exact-copy and transformation totals are recomputed from all records, current audit corrections are authenticated by Git history plus exact-head CI rather than by self-referential manifest fields, and the only non-null descriptions on excluded records are the two exact historical boundary reclassifications recorded here."
 }

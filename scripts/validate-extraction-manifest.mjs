@@ -12,7 +12,12 @@ const EXPECTED = Object.freeze({
   destinationRepository: "StealthEyeLLC/quirt-x",
   snapshotCommit: "9008f6dd494cd848851234d1f4215cefb42549c0",
   snapshotTree: "82dca3c7d6aeef358a85e299e37b0234a882c518",
+  manifestBlob: "5588eae106120d0a8e5846aba46868f88a21ad8c",
   environmentBlob: "df676396e630b5ff2b496e02652eaad432595820"
+});
+const EXPECTED_EXCLUDED_RECORD_DESCRIPTIONS = Object.freeze({
+  "ops/systemd/stealtheye-fix-operator.service": "operator-only systemd unit; standalone ships quirt units only",
+  "src/server.ts": "public MCP HTTP server; requires operator-only dependencies"
 });
 const SHA1 = /^[a-f0-9]{40}$/u;
 const MODE = /^(?:100644|100755|120000)$/u;
@@ -44,10 +49,16 @@ for (const [key, expected] of Object.entries({
   destinationRepository: EXPECTED.destinationRepository
 })) equal(manifest[key], expected, key);
 
+equal(corrections.manifestBlob, EXPECTED.manifestBlob, "audit correction manifest blob");
 equal(corrections.extractionSnapshotCommit, EXPECTED.snapshotCommit, "audit correction snapshot commit");
 equal(corrections.extractionSnapshotTree, EXPECTED.snapshotTree, "audit correction snapshot tree");
 equal(manifest.finalDestinationCommit, EXPECTED.snapshotCommit, "manifest snapshot commit");
 equal(manifest.finalDestinationTree, EXPECTED.snapshotTree, "manifest snapshot tree");
+const correctionExceptions = corrections.excludedRecordDescriptionExceptions;
+if (correctionExceptions === null || typeof correctionExceptions !== "object" || Array.isArray(correctionExceptions)) fail("audit correction excluded-record exceptions are invalid");
+const expectedExceptionEntries = Object.entries(EXPECTED_EXCLUDED_RECORD_DESCRIPTIONS);
+if (Object.keys(correctionExceptions).length !== expectedExceptionEntries.length) fail("audit correction excluded-record exceptions are not exact");
+for (const [path, description] of expectedExceptionEntries) equal(correctionExceptions[path], description, `audit correction excluded-record exception for ${path}`);
 if (git(["rev-parse", `${EXPECTED.snapshotCommit}^{tree}`]) !== EXPECTED.snapshotTree) fail("snapshot commit does not resolve to the recorded tree");
 try { git(["merge-base", "--is-ancestor", EXPECTED.snapshotCommit, "HEAD"]); } catch { fail("snapshot commit is not an ancestor of HEAD"); }
 
@@ -57,7 +68,7 @@ const records = manifest.records;
 if (!Array.isArray(records)) fail("records are missing");
 const sourcePaths = new Set();
 const destinationPaths = new Set();
-let included = 0, excluded = 0, exact = 0, transformed = 0;
+let included = 0, excluded = 0, exact = 0, transformed = 0, excludedDescriptionExceptions = 0;
 for (const record of records) {
   equal(record.sourceRepository, EXPECTED.sourceRepository, `${record.sourcePath ?? "record"} source repository`);
   equal(record.sourceBranch, EXPECTED.sourceBranch, `${record.sourcePath ?? "record"} source branch`);
@@ -82,12 +93,20 @@ for (const record of records) {
     } else fail(`unknown included classification for ${record.sourcePath}`);
   } else if (record.included === false) {
     excluded += 1;
-    if (record.copyOrTransformation !== "excluded" || record.destinationPath !== null || record.destinationBlob !== null || record.transformationDescription !== null || typeof record.reason !== "string" || record.reason.length === 0) fail(`invalid excluded record for ${record.sourcePath}`);
+    if (record.copyOrTransformation !== "excluded" || record.destinationPath !== null || record.destinationBlob !== null || typeof record.reason !== "string" || record.reason.length === 0) fail(`invalid excluded record for ${record.sourcePath}`);
+    const expectedDescription = EXPECTED_EXCLUDED_RECORD_DESCRIPTIONS[record.sourcePath];
+    if (expectedDescription === undefined) {
+      if (record.transformationDescription !== null) fail(`invalid excluded record for ${record.sourcePath}`);
+    } else {
+      if (record.transformationDescription !== expectedDescription || record.reason !== expectedDescription) fail(`invalid historical boundary explanation for ${record.sourcePath}`);
+      excludedDescriptionExceptions += 1;
+    }
   } else fail(`included flag is invalid for ${record.sourcePath}`);
 }
 
 if (records.length !== 188 || sourcePaths.size !== 188 || included !== 87 || excluded !== 101 || included + excluded !== records.length) fail("record classification totals are invalid");
 if (exact + transformed !== included) fail("computed copy/transformation totals do not equal included records");
+if (excludedDescriptionExceptions !== expectedExceptionEntries.length) fail("historical boundary explanations are incomplete");
 if (!Array.isArray(corrections.summaryFieldsSupersededByRecordComputation) || !corrections.summaryFieldsSupersededByRecordComputation.includes("exactCopyCount") || !corrections.summaryFieldsSupersededByRecordComputation.includes("transformedCount")) fail("audit correction does not supersede inconsistent manifest summary fields");
 
 const environment = records.find((record) => record.sourcePath === "src/quirt/environment.test.ts");
