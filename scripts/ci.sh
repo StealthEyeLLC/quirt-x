@@ -90,7 +90,7 @@ gate "clean-install" bash -c 'rm -rf node_modules dist .test-dist && npm ci'
 gate "dependency-tree" npm ls --all >/dev/null
 gate "production-audit" bash -c 'npm audit --omit=dev --audit-level=high'
 gate "typecheck" npm run check
-gate "test-compile" npm run clean && tsc -p tsconfig.test.json
+gate "test-compile" bash -c 'npm run clean && npx tsc -p tsconfig.test.json'
 gate "unit-tests" npm test
 gate "production-build" npm run build
 gate "riding-guide" npm run test:riding-guide
