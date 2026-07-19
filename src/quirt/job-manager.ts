@@ -249,7 +249,12 @@ export class QuirtJobManager {
 
   async exec(requestId: string, principalFingerprint: string, input: QuirtExecInput, abortSignal?: AbortSignal): Promise<QuirtExecResult> {
     const existing = this.state.getJobByRequestId(requestId);
-    if (existing !== null) return await this.#materializeExecResult(existing);
+    if (existing !== null) {
+      if (existing.ownerPrincipalFingerprint !== principalFingerprint) {
+        throw new QuirtError("authorization_failed", "Quirt job principal does not match");
+      }
+      return await this.#materializeExecResult(existing);
+    }
     if (abortSignal !== undefined && abortSignal.aborted) throw new QuirtError("request_canceled", "Quirt execution was canceled before start");
     const shellPath = input.shellPath ?? this.config.shellPath;
     const launched = launch(input, shellPath);
