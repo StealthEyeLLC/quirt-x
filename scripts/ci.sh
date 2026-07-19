@@ -30,15 +30,16 @@ require_cmd() {
 
 write_receipt() {
   local result="$1"
-  local finish_ts pty_path pty_digest
+  local finish_ts pty_path pty_digest gates_json
   finish_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   pty_path="node_modules/node-pty/build/Release/pty.node"
   if [[ -f "$pty_path" ]]; then pty_digest="$(sha256sum "$pty_path" | awk '{print $1}')"; else pty_digest=""; fi
-  node --input-type=module - "$RECEIPT" "$result" "$COMMIT" "$TREE" "$START_TS" "$finish_ts" "$pty_path" "$pty_digest" "${GATES[*]}" <<'NODE'
+  gates_json="$(printf '%s\n' "${GATES[@]}" | node --input-type=module -e 'import { readFileSync } from "node:fs"; const gates=readFileSync(0,"utf8").trim().split(/\n/).filter(Boolean).map((line)=>JSON.parse(line)); process.stdout.write(JSON.stringify(gates));')"
+  node --input-type=module - "$RECEIPT" "$result" "$COMMIT" "$TREE" "$START_TS" "$finish_ts" "$pty_path" "$pty_digest" "$gates_json" <<'NODE'
 import { writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
-const [path, result, commit, tree, start, finish, ptyPath, ptyDigest, ...gateParts] = process.argv.slice(2);
-const gates = gateParts.map((item) => JSON.parse(item));
+const [path, result, commit, tree, start, finish, ptyPath, ptyDigest, gatesJson] = process.argv.slice(2);
+const gates = JSON.parse(gatesJson);
 const npmVersion = execSync("npm --version", { encoding: "utf8" }).trim();
 const tsVersion = execSync("npx tsc --version", { encoding: "utf8" }).trim().replace(/^Version /, "");
 writeFileSync(path, `${JSON.stringify({
