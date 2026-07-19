@@ -105,7 +105,7 @@ gate "quirt-release-tests" npm run test:quirt-release
 
 SOURCE_EPOCH="$(node --input-type=module -e "import {readFileSync} from 'node:fs'; const m=JSON.parse(readFileSync('provenance/extraction-manifest.json','utf8')); process.stdout.write(String(m.sourceEpoch))")"
 export SOURCE_DATE_EPOCH="$SOURCE_EPOCH"
-gate "release-build" bash -c "scripts/build-quirt-release.sh 6b4968e9443653af6636f2490bf3c4fc14da4cea 358516dd79dc18c2080b99779ce0b3e428fc9b63 release-output $SOURCE_EPOCH"
+gate "release-build" bash -c "npm run build && scripts/build-quirt-release.sh 6b4968e9443653af6636f2490bf3c4fc14da4cea 358516dd79dc18c2080b99779ce0b3e428fc9b63 release-output $SOURCE_EPOCH"
 
 write_receipt pass
 printf 'CI passed for %s\n' "$COMMIT"
