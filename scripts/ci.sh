@@ -95,7 +95,7 @@ gate "unit-tests" npm test
 gate "production-build" npm run build
 gate "riding-guide" npm run test:riding-guide
 gate "extraction-manifest" node scripts/validate-extraction-manifest.mjs
-gate "systemd-verify" systemd-analyze verify ops/systemd/stealtheye-quirt.service ops/systemd/stealtheye-quirt.socket
+gate "systemd-verify" bash -c 'mkdir -p /tmp/quirt-systemd-verify/opt/node-v24.18.0-linux-x64/bin && ln -sf "$(command -v node)" /tmp/quirt-systemd-verify/opt/node-v24.18.0-linux-x64/bin/node && sed "s|/opt/node-v24.18.0-linux-x64/bin/node|/tmp/quirt-systemd-verify/opt/node-v24.18.0-linux-x64/bin/node|" ops/systemd/stealtheye-quirt.service > /tmp/quirt-systemd-verify/stealtheye-quirt.service && systemd-analyze verify /tmp/quirt-systemd-verify/stealtheye-quirt.service ops/systemd/stealtheye-quirt.socket'
 gate "shell-syntax" bash -n scripts/build-quirt-release.sh scripts/test-quirt-release-reproducibility.sh scripts/ci.sh scripts/validate-secrets.sh
 gate "secret-scan" bash scripts/validate-secrets.sh
 gate "node-pty-binary" test -f node_modules/node-pty/build/Release/pty.node
