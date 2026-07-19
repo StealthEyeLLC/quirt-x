@@ -3,6 +3,8 @@ import { join } from "node:path";
 import type { QuirtConfig } from "./config.js";
 import { loadQuirtConfig } from "./config.js";
 import type { QuirtPrincipalEnvelope } from "./protocol.js";
+import { createTestAuthorityRuntime } from "./authority-runtime.js";
+import type { QuirtStateStore } from "./state.js";
 
 class LinkedDuplex extends Duplex {
   peer: LinkedDuplex | null = null;
@@ -23,10 +25,15 @@ export function linkedDuplexPair(): [Duplex, Duplex] {
 export function quirtTestConfig(root: string, overrides: NodeJS.ProcessEnv = {}): QuirtConfig {
   return loadQuirtConfig({
     QUIRT_MODE: "test",
+    QUIRT_CONFIG_ROOT: root,
     QUIRT_STATE_ROOT: root,
     QUIRT_DATABASE_PATH: join(root, "state.sqlite"),
     QUIRT_SOCKET_PATH: join(root, "quirt.sock"),
     QUIRT_AUTHORITY_SECRET_PATH: join(root, "authority.key"),
+    QUIRT_GATEWAY_SIGNING_PRIVATE_KEY_PATH: join(root, "gateway-signing.key"),
+    QUIRT_GATEWAY_VERIFICATION_KEY_RING_PATH: join(root, "gateway-verification-keys.json"),
+    QUIRT_SUPERVISOR_SIGNING_PRIVATE_KEY_PATH: join(root, "supervisor-signing.key"),
+    QUIRT_SUPERVISOR_VERIFICATION_KEY_RING_PATH: join(root, "supervisor-verification-keys.json"),
     QUIRT_TARGET_HOST: "vps-test-01",
     QUIRT_EXPECTED_ISSUER: "https://issuer.test",
     QUIRT_EXPECTED_SUBJECT: "jamie-currier",
@@ -53,6 +60,10 @@ export const TEST_PRINCIPAL: QuirtPrincipalEnvelope = Object.freeze({
   grantId: "grant-test-1",
   grantVersion: 1
 });
+
+export function installTestAuthority(config: QuirtConfig, state: QuirtStateStore, root: string) {
+  return createTestAuthorityRuntime(config, state, root);
+}
 
 export async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

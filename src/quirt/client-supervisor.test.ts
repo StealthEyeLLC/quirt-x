@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { afterEach, describe, it } from "node:test";
-import { QuirtGatewaySigner, QuirtSupervisorAuthority } from "./authority.js";
 import { QuirtGatewayClient, type QuirtSocketFactory } from "./client.js";
 import { QuirtError } from "./error.js";
 import type { QuirtFileService } from "./file-service.js";
@@ -19,7 +18,7 @@ import { encodeFrame, QUIRT_PROTOCOL_VERSION, type QuirtFrame } from "./protocol
 import { QuirtSessionManager } from "./session-manager.js";
 import { QuirtStateStore } from "./state.js";
 import { QuirtSupervisorServer } from "./supervisor.js";
-import { linkedDuplexPair, quirtTestConfig, TEST_PRINCIPAL, waitFor } from "./test-support.test.js";
+import { linkedDuplexPair, installTestAuthority, quirtTestConfig, TEST_PRINCIPAL, waitFor } from "./test-support.test.js";
 import type { QuirtTmuxController } from "./tmux.js";
 
 class FakePty implements QuirtPtyProcess {
@@ -63,21 +62,21 @@ afterEach(() => {
 });
 
 function fixture(options: { files?: QuirtFileService; journal?: QuirtJournalAdapter } = {}): { root: string; client: QuirtGatewayClient; newClient: () => QuirtGatewayClient; sockets: SupervisorSockets; ptys: FakePtys; state: QuirtStateStore } {
-  const root = mkdtempSync(join(tmpdir(), "quirt-protocol-integration-")); roots.push(root); const config = quirtTestConfig(root); const state = new QuirtStateStore(":memory:"); stores.push(state); const ptys = new FakePtys(); const tmux = new NoTmux() as unknown as QuirtTmuxController; const sessionManager = new QuirtSessionManager(config, state, ptys, tmux); const jobManager = new QuirtJobManager(config, state, ptys); sessions.push(sessionManager); jobs.push(jobManager);
+  const root = mkdtempSync(join(tmpdir(), "quirt-protocol-integration-")); roots.push(root); const config = quirtTestConfig(root); const state = new QuirtStateStore(":memory:"); stores.push(state); const authority = installTestAuthority(config, state, root); const ptys = new FakePtys(); const tmux = new NoTmux() as unknown as QuirtTmuxController; const sessionManager = new QuirtSessionManager(config, state, ptys, tmux); const jobManager = new QuirtJobManager(config, state, ptys); sessions.push(sessionManager); jobs.push(jobManager);
   const services = {
     ...(options.files === undefined ? {} : { files: options.files }),
     ...(options.journal === undefined ? {} : { processService: new QuirtProcessService(config, state, sessionManager, jobManager, options.journal, (pid, signal) => { if (pid !== Number(readlinkSync("/proc/self")) || signal !== 0 && signal !== "SIGCONT") throw new Error("unexpected test signal"); }) })
   };
-  const secret = Buffer.alloc(32, 0x4d); const authority = new QuirtSupervisorAuthority(config, secret, state); const dispatcher = new QuirtOperationDispatcher(config, state, sessionManager, jobManager, tmux, "test-revision", services); const supervisor = new QuirtSupervisorServer(config, state, authority, dispatcher, sessionManager, jobManager, { read: () => ({ pid: process.pid, uid: config.gatewayUid, gid: process.getgid?.() ?? 0 }) }); const socketFactory = new SupervisorSockets(supervisor, config.gatewayUid); sockets.push(socketFactory);
-  const newClient = () => { const value = new QuirtGatewayClient(config, new QuirtGatewaySigner(config.gatewayId, secret), socketFactory); clients.push(value); return value; };
+  const dispatcher = new QuirtOperationDispatcher(config, state, sessionManager, jobManager, tmux, "test-revision", services); const supervisor = new QuirtSupervisorServer(config, state, authority.supervisorAuthority, dispatcher, sessionManager, jobManager, { read: () => ({ pid: process.pid, uid: config.gatewayUid, gid: process.getgid?.() ?? 0 }) }); const socketFactory = new SupervisorSockets(supervisor, config.gatewayUid); sockets.push(socketFactory);
+  const newClient = () => { const value = new QuirtGatewayClient(config, authority.gatewaySigner, socketFactory, { supervisorVerificationKeyRing: authority.supervisorVerificationKeyRing }); clients.push(value); return value; };
   return { root, client: newClient(), newClient, sockets: socketFactory, ptys, state };
 }
 
 describe("Quirt Gateway client and root supervisor", () => {
   it("normalizes an unavailable supervisor and bounds reconnect attempts", async () => {
-    const root = mkdtempSync(join(tmpdir(), "quirt-unavailable-")); roots.push(root); const config = quirtTestConfig(root); const secret = Buffer.alloc(32, 0x31); let attempts = 0;
+    const root = mkdtempSync(join(tmpdir(), "quirt-unavailable-")); roots.push(root); const config = quirtTestConfig(root, { QUIRT_MAX_RECONNECT_ATTEMPTS: "2" }); const state = new QuirtStateStore(":memory:"); stores.push(state); const authority = installTestAuthority(config, state, root); let attempts = 0;
     const factory: QuirtSocketFactory = { connect: async () => { attempts += 1; throw new QuirtError("supervisor_unavailable", "private socket unavailable", true); } };
-    const client = new QuirtGatewayClient(config, new QuirtGatewaySigner(config.gatewayId, secret), factory); clients.push(client);
+    const client = new QuirtGatewayClient(config, authority.gatewaySigner, factory, { supervisorVerificationKeyRing: authority.supervisorVerificationKeyRing }); clients.push(client);
     await assert.rejects(client.request({ operation: "quirt.status", principal: TEST_PRINCIPAL, requestId: "unavailable-supervisor" }), (cause: unknown) => cause instanceof QuirtError && cause.code === "supervisor_unavailable" && cause.retryable);
     assert.equal(attempts, 2);
   });
@@ -124,11 +123,11 @@ describe("Quirt Gateway client and root supervisor", () => {
   });
 
   it("fails closed on an unsupported supervisor protocol version", async () => {
-    const root = mkdtempSync(join(tmpdir(), "quirt-mismatch-")); roots.push(root); const config = quirtTestConfig(root); const secret = Buffer.alloc(32, 0x22);
+    const root = mkdtempSync(join(tmpdir(), "quirt-mismatch-")); roots.push(root); const config = quirtTestConfig(root); const state = new QuirtStateStore(":memory:"); stores.push(state); const authority = installTestAuthority(config, state, root);
     const factory: QuirtSocketFactory = { connect: async () => {
-      const [client, server] = linkedDuplexPair(); let replied = false; server.on("data", () => { if (replied) return; replied = true; const frame: QuirtFrame = { envelope: { kind: "welcome", protocolVersion: QUIRT_PROTOCOL_VERSION, connectionId: "wrong", supervisorId: config.supervisorId, challengeResponse: "wrong", capabilities: [], timestamp: new Date().toISOString(), binaryLength: 0 }, binary: Buffer.alloc(0) }; const bytes = encodeFrame(frame); bytes.writeUInt8(2, 4); server.write(bytes); }); return client;
+      const [client, server] = linkedDuplexPair(); let replied = false; server.on("data", () => { if (replied) return; replied = true; const frame: QuirtFrame = { envelope: { kind: "welcome", protocolVersion: QUIRT_PROTOCOL_VERSION, connectionId: "wrong", supervisorId: config.supervisorId, challengeResponse: "wrong", capabilities: [], selectedAuthorityAlgorithm: "ed25519", selectedCompression: "none", timestamp: new Date().toISOString(), binaryLength: 0 }, binary: Buffer.alloc(0) }; const bytes = encodeFrame(frame); bytes.writeUInt8(2, 4); server.write(bytes); }); return client;
     } };
-    const client = new QuirtGatewayClient(config, new QuirtGatewaySigner(config.gatewayId, secret), factory); clients.push(client); await assert.rejects(client.probe(), /disconnected|unsupported|timed out/u);
+    const client = new QuirtGatewayClient(config, authority.gatewaySigner, factory, { supervisorVerificationKeyRing: authority.supervisorVerificationKeyRing }); clients.push(client); await assert.rejects(client.probe(), /disconnected|unsupported|timed out/u);
   });
 
   it("propagates MCP cancellation through the Gateway protocol into a bounded supervisor operation", async () => {

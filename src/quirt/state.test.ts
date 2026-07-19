@@ -120,11 +120,14 @@ describe("Quirt durable state", () => {
 
   it("persists idempotency and rejects conflicting IDs and replayed nonces", () => {
     const store = new QuirtStateStore(":memory:");
-    assert.equal(store.reserveRequest("request-1", "quirt.exec", "a".repeat(64), "nonce-1", "2099-01-01T00:00:00.000Z"), "new");
-    assert.equal(store.reserveRequest("request-1", "quirt.exec", "a".repeat(64), "nonce-1", "2099-01-01T00:00:00.000Z"), "replayed");
-    assert.equal(store.reserveRequest("request-1", "quirt.exec", "a".repeat(64), "nonce-3", "2099-01-01T00:00:00.000Z"), "replayed");
-    assert.throws(() => store.reserveRequest("request-1", "quirt.exec", "b".repeat(64), "nonce-2", "2099-01-01T00:00:00.000Z"), /different work/u);
-    assert.throws(() => store.reserveRequest("request-2", "quirt.exec", "a".repeat(64), "nonce-1", "2099-01-01T00:00:00.000Z"), /nonce/u);
+    const identity = (nonce: string, algorithm: "hmac-sha256" | "ed25519" = "hmac-sha256", keyId: string | null = null) => ({
+      gatewayId: "stealtheye-horsey-gateway", algorithm, keyId, nonce
+    });
+    assert.equal(store.reserveRequest("request-1", "quirt.exec", "a".repeat(64), identity("nonce-1"), "2099-01-01T00:00:00.000Z"), "new");
+    assert.equal(store.reserveRequest("request-1", "quirt.exec", "a".repeat(64), identity("nonce-1"), "2099-01-01T00:00:00.000Z"), "replayed");
+    assert.equal(store.reserveRequest("request-1", "quirt.exec", "a".repeat(64), identity("nonce-3"), "2099-01-01T00:00:00.000Z"), "replayed");
+    assert.throws(() => store.reserveRequest("request-1", "quirt.exec", "b".repeat(64), identity("nonce-2"), "2099-01-01T00:00:00.000Z"), /different work/u);
+    assert.throws(() => store.reserveRequest("request-2", "quirt.exec", "a".repeat(64), identity("nonce-1"), "2099-01-01T00:00:00.000Z"), /nonce/u);
     store.completeRequest("request-1", { ok: true }); assert.deepEqual(store.requestResult("request-1")?.response, { ok: true }); store.close();
   });
 

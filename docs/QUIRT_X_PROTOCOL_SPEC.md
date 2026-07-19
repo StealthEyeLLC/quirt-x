@@ -63,16 +63,22 @@ Current runtime:
 
 Q2 target:
 
-- algorithm: `ed25519`
-- key ID binding
-- algorithm binding
-- independent nonce store
-- key rotation with previous-key grace period
+- algorithm: `ed25519` (implemented in Q2 source)
+- key ID binding (implemented)
+- algorithm binding (implemented)
+- independent nonce store (implemented)
+- key rotation with previous-key grace period (implemented)
 - constant-time comparisons
 - SHA-256 or stronger content digests
 - no secret material in request logs
 
-Q1 status: target contract frozen; runtime migration planned for Q2. Q1 does not claim cryptographic runtime conformance to Ed25519.
+Q2 also implements explicit compression negotiation with only `compression.none` selected on the wire. Wire compression codecs remain unavailable.
+
+Legacy transitional compatibility:
+
+- algorithm: `hmac-sha256`
+- requires explicit configuration, handshake advertisement, negotiation, and legacy secret availability
+- must not be selected after Ed25519 negotiation or Ed25519 verification failure
 
 ## Frame classes
 
@@ -84,8 +90,8 @@ Q1 status: target contract frozen; runtime migration planned for Q2. Q1 does not
 
 ## Negotiation and bounds
 
-- feature negotiation on connect
-- compression negotiation reserved for Q2
+- feature negotiation on connect (implemented in Q2)
+- compression negotiation implemented for `none` only in Q2; compressed frames remain unavailable
 - maximum frame size bounded by configuration
 - bounded metadata and buffered bytes
 - partial or truncated frames rejected

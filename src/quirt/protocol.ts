@@ -32,12 +32,22 @@ export interface QuirtPrincipalEnvelope {
   grantVersion: number;
 }
 
-export interface QuirtAuthorityEnvelope {
+export interface QuirtEd25519AuthorityEnvelope {
+  gatewayId: string;
+  nonce: string;
+  algorithm: "ed25519";
+  keyId: string;
+  signature: string;
+}
+
+export interface QuirtHmacAuthorityEnvelope {
   gatewayId: string;
   nonce: string;
   algorithm: "hmac-sha256";
   signature: string;
 }
+
+export type QuirtAuthorityEnvelope = QuirtEd25519AuthorityEnvelope | QuirtHmacAuthorityEnvelope;
 
 export interface QuirtRequestEnvelope {
   kind: "request";
@@ -101,6 +111,9 @@ export interface QuirtWelcomeEnvelope {
   supervisorId: string;
   challengeResponse: string;
   capabilities: readonly string[];
+  selectedAuthorityAlgorithm: "ed25519" | "hmac-sha256";
+  selectedCompression: "none";
+  supervisorKeyId?: string;
   timestamp: string;
   binaryLength: 0;
 }
@@ -165,6 +178,11 @@ export function validateEnvelope(value: unknown, expectedKind: QuirtFrameKind, b
   validateCommon(value, expectedKind, binaryLength);
   if (expectedKind === "request") {
     if (!boundedString(value.requestId, 128) || !boundedString(value.operation, 128) || !boundedString(value.targetHost, 256) || !boundedString(value.timestamp, 64) || !record(value.payload) || !record(value.principal) || !record(value.authority)) throw new QuirtError("invalid_request", "Quirt request envelope is invalid");
+    const authority = value.authority as Record<string, unknown>;
+    if (!boundedString(authority.gatewayId, 128) || !boundedString(authority.nonce, 128) || typeof authority.algorithm !== "string" || !boundedString(authority.signature, 256)) throw new QuirtError("invalid_request", "Quirt authority envelope is invalid");
+    if (authority.algorithm === "ed25519") {
+      if (!boundedString(authority.keyId, 64) || !/^[a-f0-9]{64}$/u.test(String(authority.keyId))) throw new QuirtError("invalid_request", "Quirt authority envelope is invalid");
+    } else if (authority.algorithm !== "hmac-sha256" || "keyId" in authority) throw new QuirtError("invalid_request", "Quirt authority envelope is invalid");
   } else if (expectedKind === "response") {
     if (!boundedString(value.requestId, 128) || !boundedString(value.timestamp, 64) || !record(value.payload)) throw new QuirtError("invalid_frame", "Quirt response envelope is invalid");
   } else if (expectedKind === "error") {
@@ -174,7 +192,10 @@ export function validateEnvelope(value: unknown, expectedKind: QuirtFrameKind, b
   } else if (expectedKind === "hello") {
     if (!boundedString(value.connectionId, 128) || !boundedString(value.gatewayId, 128) || !boundedString(value.challenge, 256) || !Array.isArray(value.capabilities) || !boundedString(value.timestamp, 64) || value.binaryLength !== 0) throw new QuirtError("invalid_frame", "Quirt hello envelope is invalid");
   } else if (expectedKind === "welcome") {
-    if (!boundedString(value.connectionId, 128) || !boundedString(value.supervisorId, 128) || !boundedString(value.challengeResponse, 256) || !Array.isArray(value.capabilities) || !boundedString(value.timestamp, 64) || value.binaryLength !== 0) throw new QuirtError("invalid_frame", "Quirt welcome envelope is invalid");
+    if (!boundedString(value.connectionId, 128) || !boundedString(value.supervisorId, 128) || !boundedString(value.challengeResponse, 512) || !Array.isArray(value.capabilities) || !boundedString(value.timestamp, 64) || value.binaryLength !== 0) throw new QuirtError("invalid_frame", "Quirt welcome envelope is invalid");
+    if (value.selectedAuthorityAlgorithm !== "ed25519" && value.selectedAuthorityAlgorithm !== "hmac-sha256") throw new QuirtError("invalid_frame", "Quirt welcome envelope is invalid");
+    if (value.selectedCompression !== "none") throw new QuirtError("invalid_frame", "Quirt welcome envelope is invalid");
+    if (value.selectedAuthorityAlgorithm === "ed25519" && !boundedString(value.supervisorKeyId, 64)) throw new QuirtError("invalid_frame", "Quirt welcome envelope is invalid");
   } else if (expectedKind === "cancel") {
     if (!boundedString(value.requestId, 128) || !boundedString(value.timestamp, 64) || value.binaryLength !== 0) throw new QuirtError("invalid_frame", "Quirt cancellation envelope is invalid");
   } else if (expectedKind === "ping" || expectedKind === "pong") {

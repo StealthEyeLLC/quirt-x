@@ -1,5 +1,5 @@
-import { loadAuthoritySecret, QuirtSupervisorAuthority } from "./authority.js";
 import { loadQuirtConfig } from "./config.js";
+import { loadAuthorityRuntime } from "./authority-runtime.js";
 import { QuirtJobManager } from "./job-manager.js";
 import { QuirtOperationDispatcher } from "./operations.js";
 import { LinuxQuirtPeerCredentialSource } from "./peer-credentials.js";
@@ -16,9 +16,9 @@ async function main(): Promise<void> {
   const tmux = new QuirtTmuxController(config, ptys);
   const sessions = new QuirtSessionManager(config, state, ptys, tmux);
   const jobs = new QuirtJobManager(config, state, ptys);
-  const authority = new QuirtSupervisorAuthority(config, loadAuthoritySecret(config.authoritySecretPath), state);
+  const { supervisorAuthority } = loadAuthorityRuntime(config, state, null);
   const operations = new QuirtOperationDispatcher(config, state, sessions, jobs, tmux);
-  const supervisor = new QuirtSupervisorServer(config, state, authority, operations, sessions, jobs, new LinuxQuirtPeerCredentialSource(config.pythonPath));
+  const supervisor = new QuirtSupervisorServer(config, state, supervisorAuthority, operations, sessions, jobs, new LinuxQuirtPeerCredentialSource(config.pythonPath));
   const tmuxVersion = await tmux.version();
   const recovery = await supervisor.start();
   process.stdout.write(`${JSON.stringify({ event: "quirt.ready", supervisorId: config.supervisorId, protocolVersion: 1, stateSchemaVersion: state.schemaVersion(), tmuxVersion, recovery })}\n`);
