@@ -10,9 +10,9 @@
 
 ## 1. Product definition
 
-Quirt is Horsey's persistent, reconnectable, fully interactive, unrestricted remote root operator.
+Quirt is a standalone UID-0 persistent, reconnectable, fully interactive, unrestricted local root operator. Horsey is an optional controller, not a runtime dependency.
 
-Quirt shall provide the practical equivalent of a direct root login through a high-quality terminal application while being callable and controllable through Horsey. It is intended to replace Termius for routine engineering and operations.
+Quirt shall provide the practical equivalent of a direct root login through a high-quality terminal application. Authorized clients include a standalone CLI/admin client, an optional Horsey controller, and a future thin ChatGPT Quirt plugin. Quirt is intended to replace Termius for routine engineering and operations.
 
 Quirt shall provide:
 

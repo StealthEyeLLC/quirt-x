@@ -48,13 +48,31 @@ jobs:
       - name: Run repository CI
         run: npm run ci
 
+      - name: Prepare CI evidence directory
+        if: always()
+        run: |
+          mkdir -p ci-evidence
+          if [ -f ".ci-receipts/ci-$(git rev-parse HEAD).json" ]; then
+            cp ".ci-receipts/ci-$(git rev-parse HEAD).json" "ci-evidence/ci-receipt.json"
+            node --input-type=module -e '
+              import { createHash } from "node:crypto";
+              import { readFileSync, writeFileSync } from "node:fs";
+              const commit = process.argv[1];
+              const tree = process.argv[2];
+              const manifest = { commit, tree, receiptPath: "ci-receipt.json" };
+              writeFileSync("ci-evidence/manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+              const digest = createHash("sha256").update(readFileSync("ci-evidence/ci-receipt.json")).digest("hex");
+              writeFileSync("ci-evidence/manifest.sha256", `${digest}\n`);
+            ' "$(git rev-parse HEAD)" "$(git rev-parse 'HEAD^{tree}')"
+          fi
+
       - name: Upload CI evidence
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            .ci-receipts/**
+            ci-evidence/**
             release-output/**
           retention-days: 14
           if-no-files-found: warn

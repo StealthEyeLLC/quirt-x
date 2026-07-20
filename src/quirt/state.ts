@@ -10,7 +10,19 @@ import type { QuirtAuthorityIdentity, QuirtRequestReservation } from "./authorit
 export const QUIRT_STATE_SCHEMA_VERSION = QUIRT_POWER_SCHEMA_VERSION;
 
 export type QuirtSessionStatus = "creating" | "running" | "detached" | "exited" | "closed" | "lost";
-export type QuirtJobStatus = "starting" | "running" | "exited" | "failed" | "signaled" | "canceled" | "lost" | "unknown";
+export type QuirtJobStatus =
+  | "starting"
+  | "running"
+  | "terminating"
+  | "exited"
+  | "failed"
+  | "signaled"
+  | "canceled"
+  | "timed_out"
+  | "spawn_failed"
+  | "identity_lost"
+  | "lost"
+  | "unknown";
 export type QuirtStreamOwner = "session" | "job";
 
 export interface QuirtSessionRecord {
@@ -55,17 +67,35 @@ export interface QuirtJobRecord {
   command: Readonly<Record<string, unknown>>;
   workingDirectory: string;
   environment: Readonly<Record<string, string>>;
+  environmentKeys: readonly string[];
+  environmentPolicyDigest: string | null;
   stdinSupported: boolean;
   processId: number | null;
+  processIdentity: Readonly<Record<string, unknown>> | null;
+  launchDocumentDigest: string | null;
+  observedExecutable: string | null;
+  observedWorkingDirectory: string | null;
+  receiptId: string | null;
   stdoutStreamId: string;
   stderrStreamId: string;
   exitCode: number | null;
   exitSignal: string | null;
   timedOut: boolean;
+  ptyStreamModel: "combined" | "separate";
   createdAt: string;
   updatedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+export interface QuirtExecutionReceiptRecord {
+  receiptId: string;
+  jobId: string;
+  requestId: string;
+  ownerPrincipalFingerprint: string;
+  receiptDigest: string;
+  receipt: Readonly<Record<string, unknown>>;
+  createdAt: string;
 }
 
 export interface QuirtStreamRecord {
@@ -122,13 +152,21 @@ interface JobRow {
   command_json: string;
   working_directory: string;
   environment_json: string;
+  environment_keys_json: string | null;
+  environment_policy_digest: string | null;
   stdin_supported: number;
   process_id: number | null;
+  process_identity_json: string | null;
+  launch_document_digest: string | null;
+  observed_executable: string | null;
+  observed_working_directory: string | null;
+  receipt_id: string | null;
   stdout_stream_id: string;
   stderr_stream_id: string;
   exit_code: number | null;
   exit_signal: string | null;
   timed_out: number;
+  pty_stream_model: string | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -200,13 +238,21 @@ function job(row: JobRow): QuirtJobRecord {
     command: Object.freeze(parseObject<Record<string, unknown>>(row.command_json, "job command")),
     workingDirectory: row.working_directory,
     environment: Object.freeze(parseObject<Record<string, string>>(row.environment_json, "job environment")),
+    environmentKeys: Object.freeze(parseArray<string>(row.environment_keys_json ?? "[]", "job environment keys")),
+    environmentPolicyDigest: row.environment_policy_digest,
     stdinSupported: row.stdin_supported === 1,
     processId: row.process_id,
+    processIdentity: row.process_identity_json === null ? null : Object.freeze(parseObject<Record<string, unknown>>(row.process_identity_json, "job process identity")),
+    launchDocumentDigest: row.launch_document_digest,
+    observedExecutable: row.observed_executable,
+    observedWorkingDirectory: row.observed_working_directory,
+    receiptId: row.receipt_id,
     stdoutStreamId: row.stdout_stream_id,
     stderrStreamId: row.stderr_stream_id,
     exitCode: row.exit_code,
     exitSignal: row.exit_signal,
     timedOut: row.timed_out === 1,
+    ptyStreamModel: row.pty_stream_model === "combined" ? "combined" : "separate",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at,
@@ -247,6 +293,7 @@ export class QuirtStateStore implements QuirtRequestReservation {
     migrateQuirtNativeState(this.#db, this.#now);
     migrateQuirtPowerState(this.#db, this.#now);
     this.#migrateQ2AuthorityNonces();
+    this.#migrateQ3Execution();
     this.native = new QuirtNativeStateStore(this.#db, this.#now);
     this.power = new QuirtPowerStateStore(this.#db, this.#now);
   }
@@ -364,6 +411,39 @@ export class QuirtStateStore implements QuirtRequestReservation {
         FROM quirt_request_nonces n
         JOIN quirt_request_records r ON r.request_id = n.request_id`);
       this.#db.prepare("INSERT INTO quirt_schema_migrations(version,applied_at) VALUES(19,?)").run(timestamp(this.#now));
+    });
+  }
+
+  #migrateQ3Execution(): void {
+    const current = Number((this.#db.prepare("SELECT COALESCE(MAX(version),0) AS version FROM quirt_schema_migrations").get() as { version: number }).version);
+    if (current >= 20) return;
+    if (current !== 19) throw new QuirtError("configuration_error", "Quirt execution migration order is invalid");
+    this.#transaction(() => {
+      for (const statement of [
+        "ALTER TABLE quirt_jobs ADD COLUMN environment_keys_json TEXT",
+        "ALTER TABLE quirt_jobs ADD COLUMN environment_policy_digest TEXT",
+        "ALTER TABLE quirt_jobs ADD COLUMN process_identity_json TEXT",
+        "ALTER TABLE quirt_jobs ADD COLUMN launch_document_digest TEXT",
+        "ALTER TABLE quirt_jobs ADD COLUMN observed_executable TEXT",
+        "ALTER TABLE quirt_jobs ADD COLUMN observed_working_directory TEXT",
+        "ALTER TABLE quirt_jobs ADD COLUMN receipt_id TEXT",
+        "ALTER TABLE quirt_jobs ADD COLUMN pty_stream_model TEXT"
+      ]) {
+        try { this.#db.exec(statement); }
+        catch (cause) { if (!(cause instanceof Error && cause.message.includes("duplicate column"))) throw cause; }
+      }
+      this.#db.exec(`CREATE TABLE IF NOT EXISTS quirt_execution_receipts(
+        receipt_id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL UNIQUE REFERENCES quirt_jobs(job_id),
+        request_id TEXT NOT NULL,
+        owner_principal_fingerprint TEXT NOT NULL,
+        receipt_digest TEXT NOT NULL,
+        receipt_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS quirt_execution_receipts_request ON quirt_execution_receipts(request_id);
+      CREATE INDEX IF NOT EXISTS quirt_execution_receipts_owner ON quirt_execution_receipts(owner_principal_fingerprint,created_at);`);
+      this.#db.prepare("INSERT INTO quirt_schema_migrations(version,applied_at) VALUES(20,?)").run(timestamp(this.#now));
     });
   }
 
@@ -535,17 +615,29 @@ export class QuirtStateStore implements QuirtRequestReservation {
 
   createJob(input: {
     jobId?: string; requestId: string; ownerPrincipalFingerprint: string; command: Record<string, unknown>;
-    workingDirectory: string; environment?: Readonly<Record<string, string>>; stdinSupported?: boolean;
+    workingDirectory: string; environment?: Readonly<Record<string, string>>; environmentKeys?: readonly string[];
+    environmentPolicyDigest?: string | null; launchDocumentDigest?: string | null; stdinSupported?: boolean; ptyStreamModel?: "combined" | "separate";
   }): QuirtJobRecord {
-    const jobId = input.jobId ?? randomUUID();
-    const stdout = this.createStream("job", jobId, "stdout");
-    const stderr = this.createStream("job", jobId, "stderr");
-    const at = timestamp(this.#now);
-    this.#db.prepare(`INSERT INTO quirt_jobs(
-      job_id,request_id,status,owner_principal_fingerprint,command_json,working_directory,environment_json,stdin_supported,
-      stdout_stream_id,stderr_stream_id,created_at,updated_at
-    ) VALUES(?,?,'starting',?,?,?,?,?,?,?,?,?)`).run(jobId, input.requestId, input.ownerPrincipalFingerprint, JSON.stringify(input.command), input.workingDirectory, JSON.stringify(input.environment ?? {}), input.stdinSupported ? 1 : 0, stdout.streamId, stderr.streamId, at, at);
-    return this.getJob(jobId);
+    return this.#transaction(() => {
+      const existing = this.#db.prepare("SELECT job_id FROM quirt_jobs WHERE request_id=?").get(input.requestId) as { job_id: string } | undefined;
+      if (existing !== undefined) return this.getJob(existing.job_id);
+      const jobId = input.jobId ?? randomUUID();
+      const stdout = this.createStream("job", jobId, "stdout");
+      const stderr = this.createStream("job", jobId, "stderr");
+      const at = timestamp(this.#now);
+      const environment = input.environment ?? {};
+      const environmentKeys = input.environmentKeys ?? Object.keys(environment).sort();
+      this.#db.prepare(`INSERT INTO quirt_jobs(
+        job_id,request_id,status,owner_principal_fingerprint,command_json,working_directory,environment_json,environment_keys_json,
+        environment_policy_digest,launch_document_digest,stdin_supported,pty_stream_model,stdout_stream_id,stderr_stream_id,created_at,updated_at
+      ) VALUES(?,?,'starting',?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        jobId, input.requestId, input.ownerPrincipalFingerprint, JSON.stringify(input.command), input.workingDirectory,
+        JSON.stringify(environment), JSON.stringify(environmentKeys), input.environmentPolicyDigest ?? null,
+        input.launchDocumentDigest ?? null, input.stdinSupported ? 1 : 0, input.ptyStreamModel ?? "separate",
+        stdout.streamId, stderr.streamId, at, at
+      );
+      return this.getJob(jobId);
+    });
   }
 
   getJob(jobId: string): QuirtJobRecord {
@@ -554,27 +646,99 @@ export class QuirtStateStore implements QuirtRequestReservation {
     return job(row);
   }
 
-  listJobs(ownerPrincipalFingerprint?: string): QuirtJobRecord[] {
-    const rows = ownerPrincipalFingerprint === undefined
-      ? this.#db.prepare("SELECT * FROM quirt_jobs ORDER BY created_at,job_id").all()
-      : this.#db.prepare("SELECT * FROM quirt_jobs WHERE owner_principal_fingerprint=? ORDER BY created_at,job_id").all(ownerPrincipalFingerprint);
+  getJobByRequestId(requestId: string): QuirtJobRecord | null {
+    const row = this.#db.prepare("SELECT job_id FROM quirt_jobs WHERE request_id=?").get(requestId) as { job_id: string } | undefined;
+    return row === undefined ? null : this.getJob(row.job_id);
+  }
+
+  listJobs(ownerPrincipalFingerprint?: string, filters: { requestId?: string; status?: QuirtJobStatus; maximum?: number } = {}): QuirtJobRecord[] {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (ownerPrincipalFingerprint !== undefined) { clauses.push("owner_principal_fingerprint=?"); params.push(ownerPrincipalFingerprint); }
+    if (filters.requestId !== undefined) { clauses.push("request_id=?"); params.push(filters.requestId); }
+    if (filters.status !== undefined) { clauses.push("status=?"); params.push(filters.status); }
+    const where = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+    const limit = filters.maximum === undefined ? "" : " LIMIT ?";
+    if (filters.maximum !== undefined) params.push(filters.maximum);
+    const rows = this.#db.prepare(`SELECT * FROM quirt_jobs ${where} ORDER BY created_at,job_id${limit}`).all(...(params as Array<string | number>));
     return (rows as unknown as JobRow[]).map(job);
   }
 
   updateJob(jobId: string, patch: {
-    status?: QuirtJobStatus; processId?: number | null; exitCode?: number | null; exitSignal?: string | null;
+    status?: QuirtJobStatus; processId?: number | null; processIdentity?: Readonly<Record<string, unknown>> | null;
+    launchDocumentDigest?: string | null; observedExecutable?: string | null; observedWorkingDirectory?: string | null;
+    receiptId?: string | null; exitCode?: number | null; exitSignal?: string | null;
     timedOut?: boolean; started?: boolean; finished?: boolean;
   }): QuirtJobRecord {
     const current = this.getJob(jobId);
+    if (["exited", "failed", "signaled", "canceled", "timed_out", "spawn_failed", "identity_lost", "lost"].includes(current.status) && patch.status !== undefined && !["exited", "failed", "signaled", "canceled", "timed_out", "spawn_failed", "identity_lost", "lost", "unknown"].includes(patch.status)) {
+      throw new QuirtError("conflict", "Quirt terminal job state cannot regress");
+    }
     const at = timestamp(this.#now);
-    this.#db.prepare(`UPDATE quirt_jobs SET status=?,process_id=?,exit_code=?,exit_signal=?,timed_out=?,updated_at=?,
-      started_at=?,finished_at=? WHERE job_id=?`).run(
-      patch.status ?? current.status, patch.processId === undefined ? current.processId : patch.processId,
-      patch.exitCode === undefined ? current.exitCode : patch.exitCode, patch.exitSignal === undefined ? current.exitSignal : patch.exitSignal,
+    this.#db.prepare(`UPDATE quirt_jobs SET status=?,process_id=?,process_identity_json=?,launch_document_digest=?,observed_executable=?,
+      observed_working_directory=?,receipt_id=?,exit_code=?,exit_signal=?,timed_out=?,updated_at=?,started_at=?,finished_at=? WHERE job_id=?`).run(
+      patch.status ?? current.status,
+      patch.processId === undefined ? current.processId : patch.processId,
+      patch.processIdentity === undefined ? (current.processIdentity === null ? null : JSON.stringify(current.processIdentity)) : (patch.processIdentity === null ? null : JSON.stringify(patch.processIdentity)),
+      patch.launchDocumentDigest === undefined ? current.launchDocumentDigest : patch.launchDocumentDigest,
+      patch.observedExecutable === undefined ? current.observedExecutable : patch.observedExecutable,
+      patch.observedWorkingDirectory === undefined ? current.observedWorkingDirectory : patch.observedWorkingDirectory,
+      patch.receiptId === undefined ? current.receiptId : patch.receiptId,
+      patch.exitCode === undefined ? current.exitCode : patch.exitCode,
+      patch.exitSignal === undefined ? current.exitSignal : patch.exitSignal,
       patch.timedOut === undefined ? current.timedOut ? 1 : 0 : patch.timedOut ? 1 : 0,
-      at, patch.started === true ? (current.startedAt ?? at) : current.startedAt, patch.finished === true ? (current.finishedAt ?? at) : current.finishedAt, jobId
+      at,
+      patch.started === true ? (current.startedAt ?? at) : current.startedAt,
+      patch.finished === true ? (current.finishedAt ?? at) : current.finishedAt,
+      jobId
     );
     return this.getJob(jobId);
+  }
+
+  streamDigest(streamId: string): { digest: string | null; complete: boolean; byteCount: number } {
+    const current = this.getStream(streamId);
+    const rows = this.#db.prepare("SELECT sha256,byte_count FROM quirt_stream_chunks WHERE stream_id=? ORDER BY start_offset ASC").all(streamId) as Array<{ sha256: string; byte_count: number }>;
+    if (rows.length === 0) return { digest: null, complete: current.status === "finalized", byteCount: 0 };
+    const hasGap = current.retainedStartOffset > 0;
+    const digest = hasGap ? null : createHash("sha256").update(rows.map(row => row.sha256).join("")).digest("hex");
+    const byteCount = Number((this.#db.prepare("SELECT COALESCE(SUM(byte_count),0) AS total FROM quirt_stream_chunks WHERE stream_id=?").get(streamId) as { total: number }).total);
+    return { digest, complete: current.status === "finalized" && !hasGap, byteCount };
+  }
+
+  insertExecutionReceipt(input: {
+    receiptId: string; jobId: string; requestId: string; ownerPrincipalFingerprint: string; receiptDigest: string; receipt: Readonly<Record<string, unknown>>;
+  }): QuirtExecutionReceiptRecord {
+    return this.#transaction(() => {
+      const existing = this.#db.prepare("SELECT receipt_id FROM quirt_execution_receipts WHERE job_id=?").get(input.jobId) as { receipt_id: string } | undefined;
+      if (existing !== undefined) return this.getExecutionReceipt(existing.receipt_id);
+      const at = timestamp(this.#now);
+      this.#db.prepare("INSERT INTO quirt_execution_receipts(receipt_id,job_id,request_id,owner_principal_fingerprint,receipt_digest,receipt_json,created_at) VALUES(?,?,?,?,?,?,?)")
+        .run(input.receiptId, input.jobId, input.requestId, input.ownerPrincipalFingerprint, input.receiptDigest, JSON.stringify(input.receipt), at);
+      this.#db.prepare("UPDATE quirt_jobs SET receipt_id=?,updated_at=? WHERE job_id=?").run(input.receiptId, at, input.jobId);
+      return this.getExecutionReceipt(input.receiptId);
+    });
+  }
+
+  getExecutionReceipt(receiptId: string): QuirtExecutionReceiptRecord {
+    const row = this.#db.prepare("SELECT * FROM quirt_execution_receipts WHERE receipt_id=?").get(receiptId) as {
+      receipt_id: string; job_id: string; request_id: string; owner_principal_fingerprint: string; receipt_digest: string; receipt_json: string; created_at: string;
+    } | undefined;
+    if (row === undefined) throw new QuirtError("not_found", "Quirt execution receipt was not found");
+    return Object.freeze({
+      receiptId: row.receipt_id,
+      jobId: row.job_id,
+      requestId: row.request_id,
+      ownerPrincipalFingerprint: row.owner_principal_fingerprint,
+      receiptDigest: row.receipt_digest,
+      receipt: Object.freeze(parseObject<Record<string, unknown>>(row.receipt_json, "execution receipt")),
+      createdAt: row.created_at
+    });
+  }
+
+  listExecutionReceipts(ownerPrincipalFingerprint: string, maximum = 256): QuirtExecutionReceiptRecord[] {
+    if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 1000) throw new QuirtError("invalid_request", "Quirt receipt list bound is invalid");
+    const rows = this.#db.prepare("SELECT receipt_id FROM quirt_execution_receipts WHERE owner_principal_fingerprint=? ORDER BY created_at DESC LIMIT ?").all(ownerPrincipalFingerprint, maximum) as Array<{ receipt_id: string }>;
+    return rows.map(row => this.getExecutionReceipt(row.receipt_id));
   }
 
   reserveRequest(requestId: string, operation: string, requestHash: string, authorityIdentity: QuirtAuthorityIdentity, expiresAt: string): "new" | "replayed" {

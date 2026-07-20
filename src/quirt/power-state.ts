@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { QuirtError } from "./error.js";
 import type { PowerProviderDefinition, PowerProviderLifecycleState } from "./power-catalog.js";
 
-export const QUIRT_POWER_SCHEMA_VERSION = 19 as const;
+export const QUIRT_POWER_SCHEMA_VERSION = 20 as const;
 
 export interface QuirtProviderInstanceRecord {
   instanceId: string;

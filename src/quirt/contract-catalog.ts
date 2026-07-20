@@ -84,6 +84,7 @@ function capabilityForOperation(operationId: string): string {
     exec: "quirt.core.exec",
     session: "quirt.session",
     job: "quirt.job",
+    receipt: "quirt.receipt",
     file: "quirt.files",
     directory: "quirt.directories",
     transfer: "quirt.transfers",
@@ -115,7 +116,7 @@ function operationDefaults(operationId: string): Pick<
   | "sideEffectClass" | "reversibility" | "rollbackMethod" | "verificationMethod" | "receiptRequirements"
   | "secretReferenceBehavior" | "networkExposure" | "dataExposure" | "healthBehavior"
 > {
-  const readOnly = /^(quirt\.(status|capabilities|version|session\.(list|get|read)|job\.(list|get|read)|file\.(stat|read|search)|directory\.(list|watch)|transfer\.(read|status)|record\.(list|search|replay|export)|process\.(list|get|tree|namespaces)|.*\.(list|get|status|interfaces|routes|connections|listeners|firewall|follow|report|flamegraph|diff|repository|port|screenshot|video|logs)))$/u.test(operationId);
+  const readOnly = /^(quirt\.(status|capabilities|version|session\.(list|get|read)|job\.(list|get|read)|receipt\.(get|list)|file\.(stat|read|search)|directory\.(list|watch)|transfer\.(read|status)|record\.(list|search|replay|export)|process\.(list|get|tree|namespaces)|.*\.(list|get|status|interfaces|routes|connections|listeners|firewall|follow|report|flamegraph|diff|repository|port|screenshot|video|logs)))$/u.test(operationId);
   const binaryIn = /^(quirt\.(exec|session\.write|job\.input|file\.write|transfer\.write|.*\.upload))$/u.test(operationId);
   const binaryOut = /^(quirt\.(exec|session\.read|job\.read|file\.read|transfer\.read|.*\.(screenshot|video|download|capture|report|flamegraph|export)))$/u.test(operationId);
   const durable = /^(quirt\.(session\.|job\.|transfer\.|record\.|git\.|sync\.|remote\.|snapshot\.|tunnel\.|trace\.|checkpoint\.|desktop\.|fleet\.|host\.|pane\.|ide\.|browser\.|preview\.|network\.))/u.test(operationId);
@@ -362,9 +363,10 @@ function buildPhaseRegistry(): QuirtProgramStatusRegistry {
   const phases: QuirtPhaseStatus[] = [
     { phase: "Q0", status: "validated", notes: "Standalone source-complete release foundation merged to main" },
     { phase: "Q1", status: "validated", notes: "Canonical standalone contracts frozen at merge candidate" },
-    { phase: "Q2", status: "source complete", notes: "Ed25519 runtime, key rotation, replay/reconnect hardening, compression negotiation, public Actions CI" }
+    { phase: "Q2", status: "source complete", notes: "Ed25519 runtime, key rotation, replay/reconnect hardening, compression negotiation, public Actions CI" },
+    { phase: "Q3", status: "source complete", notes: "Full-power execution kernel with process identity, receipts, environment policy, termination, and resource accounting" }
   ];
-  for (let index = 3; index <= 26; index += 1) {
+  for (let index = 4; index <= 26; index += 1) {
     phases.push({ phase: `Q${index}`, status: "planned", notes: "Not started in Q1" });
   }
   return Object.freeze({
@@ -384,7 +386,8 @@ function buildConformanceMatrix(): QuirtConformanceEntry[] {
     { area: "replay_protection", targetContract: "nonce and request-hash replay store", currentSourceBehavior: "independent authority nonce persistence with algorithm and key binding", implementationStatus: "source complete", firstPlannedPhase: "Q2", evidence: "state.ts quirt_authority_nonces migration", knownGap: "not production deployed", acceptableInQ1: true },
     { area: "reconnect_replay", targetContract: "reconnect request replay without duplicate execution", currentSourceBehavior: "bounded reconnect state machine preserves signed envelope", implementationStatus: "source complete", firstPlannedPhase: "Q2", evidence: "client.ts reconnect loop", knownGap: "not production deployed", acceptableInQ1: true },
     { area: "compression_negotiation", targetContract: "explicit compression negotiation", currentSourceBehavior: "compression.none negotiated and signed; wire compression unavailable", implementationStatus: "source complete", firstPlannedPhase: "Q2", evidence: "authority-negotiation.ts", knownGap: "no compressed frames", acceptableInQ1: true },
-    { area: "root_execution", targetContract: "unrestricted authenticated root execution", currentSourceBehavior: "quirt.exec and sessions without allowlists", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "operations.ts and authority contract", knownGap: "not production deployed", acceptableInQ1: true },
+    { area: "root_execution", targetContract: "unrestricted authenticated root execution", currentSourceBehavior: "quirt.exec and sessions without allowlists", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "operations.ts, job-manager.ts, execution-receipt.ts", knownGap: "not production deployed", acceptableInQ1: true },
+    { area: "execution_kernel", targetContract: "full-power execution kernel with identity and receipts", currentSourceBehavior: "quirt.exec durable execution with process identity, environment policy, termination, and immutable receipts", implementationStatus: "source complete", firstPlannedPhase: "Q3", evidence: "job-manager.ts, process-identity.ts, execution-receipt.ts, job-manager-q3.test.ts", knownGap: "not production deployed", acceptableInQ1: true },
     { area: "providers", targetContract: "provider lifecycle and fallback without disabling root authority", currentSourceBehavior: "13 source providers with provider_unavailable path", implementationStatus: "source complete", firstPlannedPhase: "Q0", evidence: "power-catalog.ts", knownGap: "not all lifecycle verbs implemented", acceptableInQ1: true },
     { area: "release_packaging", targetContract: "immutable release layout with contract bundle inclusion", currentSourceBehavior: "release builder packages dist and evidence", implementationStatus: "source complete", firstPlannedPhase: "Q1", evidence: "build-quirt-release.sh", knownGap: "contract bundle inclusion added in Q1", acceptableInQ1: true },
     { area: "rollback", targetContract: "automatic rollback triggers and verification", currentSourceBehavior: "contract only", implementationStatus: "planned", firstPlannedPhase: "Q8", evidence: "rollback contract", knownGap: "runtime not implemented", acceptableInQ1: true },
@@ -424,10 +427,12 @@ export function buildQuirtContractBundle(): QuirtContractBundle {
     product: QUIRT_PRODUCT,
     architecture: staticContractSection("architecture", {
       topology: [
-        "Jamie",
-        "ChatGPT / Horsey",
-        "Thin unprivileged OAuth and MCP gateway",
-        "Signed private Quirt protocol",
+        "Authorized Quirt client",
+        "standalone CLI/admin client",
+        "future thin ChatGPT Quirt plugin",
+        "optional Horsey controller",
+        "other explicitly authorized clients",
+        "signed private Quirt protocol",
         QUIRT_SOCKET_PATH,
         "Standalone UID-0 Quirt-X daemon"
       ],

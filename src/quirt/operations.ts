@@ -14,6 +14,7 @@ import { QuirtError } from "./error.js";
 import { QuirtFileService } from "./file-service.js";
 import { QuirtGitService } from "./git-service.js";
 import type { QuirtJobManager, QuirtExecInput } from "./job-manager.js";
+import type { QuirtEnvironmentPolicy } from "./execution-environment.js";
 import { QuirtCapabilityService } from "./capability-service.js";
 import { QuirtProcessService, type QuirtProcessIdentity } from "./process-service.js";
 import { QUIRT_PROTOCOL_VERSION, type QuirtPrincipalEnvelope, type QuirtRequestEnvelope } from "./protocol.js";
@@ -82,9 +83,39 @@ function publicSession(record: QuirtSessionRecord): Record<string, unknown> {
   return { ...rest, environmentKeys: Object.keys(storedEnvironment).sort() };
 }
 
+function environmentPolicy(value: unknown): QuirtEnvironmentPolicy | undefined {
+  if (value === undefined) return undefined;
+  const source = object(value, "Quirt environment policy");
+  const unset = source.unsetEnvironment;
+  if (unset !== undefined && (!Array.isArray(unset) || unset.some(item => typeof item !== "string"))) throw new QuirtError("invalid_request", "Quirt environment unset list is invalid");
+  return {
+    environment: environment(source.environment),
+    unsetEnvironment: unset as string[] | undefined,
+    replaceEnvironment: source.replaceEnvironment === undefined ? undefined : boolean(source.replaceEnvironment, "Quirt environment replacement")
+  };
+}
+
 function publicJob(record: QuirtJobRecord): Record<string, unknown> {
-  const { environment: storedEnvironment, ownerPrincipalFingerprint: _owner, ...rest } = record;
-  return { ...rest, environmentKeys: Object.keys(storedEnvironment).sort() };
+  const {
+    environment: _environment,
+    ownerPrincipalFingerprint: _owner,
+    command,
+    ...rest
+  } = record;
+  const safeCommand = { ...command };
+  delete safeCommand.command;
+  delete safeCommand.script;
+  return {
+    ...rest,
+    command: safeCommand,
+    environmentKeys: record.environmentKeys,
+    processIdentitySummary: record.processIdentity === null ? null : {
+      pid: record.processIdentity.pid,
+      startTimeTicks: record.processIdentity.startTimeTicks,
+      bootId: record.processIdentity.bootId,
+      executablePath: record.processIdentity.executablePath ?? null
+    }
+  };
 }
 
 function ok(payload: Record<string, unknown>, binary: Buffer = Buffer.alloc(0)): QuirtOperationResult { return { payload, binary }; }
@@ -160,7 +191,7 @@ export class QuirtOperationDispatcher {
         noBinary(binary);
         return ok({ product: "StealthEye Quirt", protocolVersion: QUIRT_PROTOCOL_VERSION, stateSchemaVersion: QUIRT_STATE_SCHEMA_VERSION, revision: this.revision, supervisorId: this.config.supervisorId, targetHost: this.config.targetHost, implementation: "native-unrestricted-root-supervisor", operationCount: QUIRT_OPERATIONS.length, operations: [...QUIRT_OPERATIONS], nodeVersion: process.version, gatewayCompatibility: { protocolVersions: [QUIRT_PROTOCOL_VERSION], exactPrincipalRequired: true, nullWorkspaceRequired: true } });
       case "quirt.exec":
-        return await this.#exec(request, payload, binary, principal);
+        return await this.#exec(request, payload, binary, principal, abortSignal);
       case "quirt.session.open": {
         noBinary(binary);
         const input: QuirtSessionOpenInput = {
@@ -210,12 +241,22 @@ export class QuirtOperationDispatcher {
       case "quirt.session.close":
         noBinary(binary);
         return ok({ session: publicSession(await this.sessions.close(text(payload.sessionId, "Quirt session ID")!, principal.principalFingerprint, signal(payload.signal, "SIGHUP"))) });
-      case "quirt.job.list":
+      case "quirt.job.list": {
         noBinary(binary);
-        return ok({ jobs: this.jobs.list(principal.principalFingerprint).map(publicJob) });
-      case "quirt.job.get":
+        const status = payload.status === undefined ? undefined : text(payload.status, "Quirt job status", { maximum: 32 }) as QuirtJobRecord["status"];
+        const requestId = text(payload.requestId, "Quirt request ID", { optional: true, maximum: 128 });
+        return ok({ jobs: this.jobs.list(principal.principalFingerprint, { ...(requestId === undefined ? {} : { requestId }), ...(status === undefined ? {} : { status }) }).map(publicJob) });
+      }
+      case "quirt.job.get": {
         noBinary(binary);
-        return ok({ job: publicJob(this.jobs.get(text(payload.jobId, "Quirt job ID")!, principal.principalFingerprint)) });
+        const jobId = text(payload.jobId, "Quirt job ID", { optional: true });
+        const requestId = text(payload.requestId, "Quirt request ID", { optional: true, maximum: 128 });
+        if (jobId !== undefined && requestId !== undefined) throw new QuirtError("invalid_request", "Quirt job lookup must use job ID or request ID");
+        const record = jobId !== undefined
+          ? this.jobs.get(jobId, principal.principalFingerprint)
+          : this.jobs.getByRequestId(requestId!, principal.principalFingerprint);
+        return ok({ job: publicJob(record) });
+      }
       case "quirt.job.read": {
         noBinary(binary);
         const stream = payload.stream === "stdout" || payload.stream === "stderr" ? payload.stream : (() => { throw new QuirtError("invalid_request", "Quirt job stream is invalid"); })();
@@ -226,16 +267,22 @@ export class QuirtOperationDispatcher {
         return ok(this.jobs.input(text(payload.jobId, "Quirt job ID")!, principal.principalFingerprint, binary, boolean(payload.close, "Quirt job input close")));
       case "quirt.job.signal":
         noBinary(binary);
-        return ok({ job: publicJob(this.jobs.signal(text(payload.jobId, "Quirt job ID")!, principal.principalFingerprint, signal(payload.signal))) });
+        return ok({ job: publicJob(await this.jobs.signal(text(payload.jobId, "Quirt job ID")!, principal.principalFingerprint, signal(payload.signal))) });
       case "quirt.job.cancel":
         noBinary(binary);
-        return ok({ job: publicJob(this.jobs.cancel(text(payload.jobId, "Quirt job ID")!, principal.principalFingerprint, boolean(payload.force, "Quirt force cancel"))) });
+        return ok({ job: publicJob(await this.jobs.cancel(text(payload.jobId, "Quirt job ID")!, principal.principalFingerprint, boolean(payload.force, "Quirt force cancel"))) });
       case "quirt.job.attach":
         noBinary(binary);
         {
           const attached = this.jobs.attach(text(payload.jobId, "Quirt job ID")!, principal.principalFingerprint);
           return ok({ ...attached, job: publicJob(attached.job as QuirtJobRecord) });
         }
+      case "quirt.receipt.get":
+        noBinary(binary);
+        return ok({ receipt: this.jobs.getReceipt(text(payload.receiptId, "Quirt receipt ID", { maximum: 128 })!, principal.principalFingerprint) });
+      case "quirt.receipt.list":
+        noBinary(binary);
+        return ok({ receipts: this.jobs.listReceipts(principal.principalFingerprint, integer(payload.maximumReceipts, "Quirt maximum receipts", 256, 1, 1000)) });
       case "quirt.file.stat":
         noBinary(binary);
         return ok(await this.files.stat({ path: text(payload.path, "Quirt file path")!, workingDirectory: text(payload.workingDirectory, "Quirt working directory", { optional: true }), followSymlinks: boolean(payload.followSymlinks, "Quirt symlink following"), digest: boolean(payload.digest, "Quirt file digest") }));
@@ -334,23 +381,39 @@ export class QuirtOperationDispatcher {
     throw new QuirtError("unknown_operation", "Quirt operation is unknown");
   }
 
-  async #exec(request: QuirtRequestEnvelope, payload: Record<string, unknown>, binary: Buffer, principal: QuirtPrincipalEnvelope): Promise<QuirtOperationResult> {
+  async #exec(request: QuirtRequestEnvelope, payload: Record<string, unknown>, binary: Buffer, principal: QuirtPrincipalEnvelope, abortSignal?: AbortSignal): Promise<QuirtOperationResult> {
+    const policy = environmentPolicy(payload.environmentPolicy);
     const result = await this.jobs.exec(request.requestId, principal.principalFingerprint, {
       command: text(payload.command, "Quirt command", { optional: true, maximum: 1024 * 1024 }),
       script: text(payload.script, "Quirt script", { optional: true, maximum: 1024 * 1024 }),
       executable: text(payload.executable, "Quirt executable", { optional: true }),
       arguments: stringArray(payload.arguments, "Quirt arguments"),
       shell: boolean(payload.shell, "Quirt shell interpretation"),
+      shellPath: text(payload.shellPath, "Quirt shell path", { optional: true }),
       workingDirectory: text(payload.workingDirectory, "Quirt working directory", { optional: true }),
       environment: environment(payload.environment),
+      environmentPolicy: policy,
       input: binary.length === 0 ? undefined : binary,
-      timeoutMs: payload.timeoutMs === undefined ? undefined : integer(payload.timeoutMs, "Quirt timeout", this.config.requestTimeoutMs, 1, 24 * 60 * 60 * 1000),
+      timeoutMs: payload.timeoutMs === undefined ? undefined : integer(payload.timeoutMs, "Quirt timeout", 1, 1, 24 * 60 * 60 * 1000),
+      forceTimeout: boolean(payload.forceTimeout, "Quirt force timeout"),
       pty: boolean(payload.pty, "Quirt PTY"),
       detach: boolean(payload.detach, "Quirt detach"),
       columns: integer(payload.columns, "Quirt terminal columns", 120, 2, 1000),
-      rows: integer(payload.rows, "Quirt terminal rows", 40, 1, 1000)
-    } satisfies QuirtExecInput);
-    const output = result.detached ? Buffer.alloc(0) : Buffer.concat([result.stdout, result.stderr]);
-    return ok({ job: publicJob(result.job), detached: result.detached, timedOut: result.timedOut, stdoutLength: result.stdout.length, stderrLength: result.stderr.length, byteCount: output.length }, output);
+      rows: integer(payload.rows, "Quirt terminal rows", 40, 1, 1000),
+      gracefulSignal: payload.gracefulSignal === undefined ? undefined : signal(payload.gracefulSignal),
+      graceIntervalMs: payload.graceIntervalMs === undefined ? undefined : integer(payload.graceIntervalMs, "Quirt grace interval", 5_000, 1, 3_600_000)
+    } satisfies QuirtExecInput, abortSignal);
+    return ok({
+      job: publicJob(result.job),
+      detached: result.detached,
+      timedOut: result.timedOut,
+      stdoutLength: result.stdout.length,
+      stderrLength: result.stderr.length,
+      stdoutStreamId: result.job.stdoutStreamId,
+      stderrStreamId: result.job.stderrStreamId,
+      receiptId: result.receiptId,
+      byteCount: result.compatibilityCombinedOutput.length,
+      compatibilityCombinedOutput: true
+    }, result.compatibilityCombinedOutput);
   }
 }

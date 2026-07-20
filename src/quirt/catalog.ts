@@ -1,10 +1,16 @@
 import { QUIRT_POWER_OPERATIONS } from "./power-catalog.js";
 
+export const QUIRT_RECEIPT_OPERATIONS = Object.freeze([
+  "quirt.receipt.get",
+  "quirt.receipt.list"
+] as const);
+
 export const QUIRT_CORE_OPERATIONS = Object.freeze([
   "quirt.status", "quirt.capabilities", "quirt.version", "quirt.exec",
   "quirt.session.open", "quirt.session.list", "quirt.session.get", "quirt.session.attach", "quirt.session.read",
   "quirt.session.write", "quirt.session.resize", "quirt.session.signal", "quirt.session.detach", "quirt.session.close",
-  "quirt.job.list", "quirt.job.get", "quirt.job.read", "quirt.job.input", "quirt.job.signal", "quirt.job.cancel", "quirt.job.attach"
+  "quirt.job.list", "quirt.job.get", "quirt.job.read", "quirt.job.input", "quirt.job.signal", "quirt.job.cancel", "quirt.job.attach",
+  ...QUIRT_RECEIPT_OPERATIONS
 ] as const);
 
 export const QUIRT_NATIVE_FOUNDATION_OPERATIONS = Object.freeze([

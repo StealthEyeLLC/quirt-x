@@ -65,9 +65,9 @@ describe("Quirt contract catalog", () => {
     const second = deterministicContractBundleJson(buildQuirtContractBundle());
     assert.equal(first, second);
     const bundle = buildQuirtContractBundle();
-    assert.equal(bundle.operations.length, 146);
+    assert.equal(bundle.operations.length, 148);
     assert.equal(bundle.providers.length, 19);
-    assert.equal(bundle.capabilities.length, 25);
+    assert.equal(bundle.capabilities.length, 26);
     assert.equal(bundle.statusTaxonomy.phases.find((item) => item.phase === "Q0")?.status, "validated");
     assert.equal(bundle.statusTaxonomy.phases.find((item) => item.phase === "Q1")?.status, "validated");
     assert.equal(bundle.statusTaxonomy.phases.find((item) => item.phase === "Q2")?.status, "source complete");
